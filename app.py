@@ -269,6 +269,47 @@ def _format_duration(ms):
     return f"{minutes}:{seconds:02d}"
 
 
+def _is_direct_muxed_video(fmt):
+    """True when the format is directly streamable and already has video + audio."""
+    return (
+        bool(fmt.get('url'))
+        and fmt.get('vcodec') != 'none'
+        and fmt.get('acodec') != 'none'
+    )
+
+
+def _select_direct_video_format(formats, quality='best'):
+    """Select best/worst direct video+audio format for streaming."""
+    candidates = [f for f in formats if _is_direct_muxed_video(f)]
+    if not candidates:
+        return None
+
+    # Prefer formats with known height, then bitrate and fps for tie-breaking.
+    def score(fmt):
+        return (
+            fmt.get('height') or 0,
+            fmt.get('tbr') or 0,
+            fmt.get('fps') or 0,
+        )
+
+    if quality == 'worst':
+        return min(candidates, key=score)
+    return max(candidates, key=score)
+
+
+def _video_mime_from_ext(ext):
+    ext = (ext or '').lower()
+    if ext == 'webm':
+        return 'video/webm'
+    if ext == 'mkv':
+        return 'video/x-matroska'
+    if ext == 'm4v':
+        return 'video/x-m4v'
+    if ext == 'mov':
+        return 'video/quicktime'
+    return 'video/mp4'
+
+
 def get_spotify_metadata(track_url):
     """
     Get Spotify track metadata using ScrapingBee + oEmbed.
@@ -469,24 +510,26 @@ def download():
     try:
         shuffled_proxies = PROXIES.copy()
         random.shuffle(shuffled_proxies)
-        
-        if quality == 'worst':
-            format_str = 'worst[ext=mp4]/worst'
-        else:
-            format_str = 'best[ext=mp4]/best'
-        
+
         for proxy in shuffled_proxies:
             try:
                 ydl_opts = {
-                    'format': format_str,
                     'proxy': f"http://{proxy}",
                     'quiet': True,
                     'no_warnings': True,
                 }
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(video_url, download=False)
-                    stream_url = info['url']
+                    selected_format = _select_direct_video_format(info.get('formats', []), quality)
+                    if not selected_format:
+                        continue
+
+                    stream_url = selected_format.get('url')
+                    if not stream_url:
+                        continue
+
                     title = info.get('title', 'video')
+                    ext = selected_format.get('ext') or 'mp4'
                     
                     # Stream the file with proper headers (through same proxy)
                     proxy_url = f"http://{proxy}"
@@ -498,13 +541,13 @@ def download():
                                 if chunk:
                                     yield chunk
                     
-                    safe_filename = re.sub(r'[^\w\-_.]', '_', title)[:100] + '.mp4'
+                    safe_filename = re.sub(r'[^\w\-_.]', '_', title)[:100] + f'.{ext}'
                     
                     return Response(
                         stream_with_context(generate()),
                         headers={
                             'Content-Disposition': f'attachment; filename="{safe_filename}"',
-                            'Content-Type': 'video/mp4',
+                            'Content-Type': _video_mime_from_ext(ext),
                         }
                     )
             except Exception:
@@ -591,16 +634,16 @@ def get_formats():
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(video_url, download=False)
                     formats = info.get('formats', [])
-                    
-                    # Find best and worst video resolutions
-                    video_formats = [f for f in formats if f.get('height') and f.get('vcodec') != 'none']
-                    if video_formats:
-                        best = max(video_formats, key=lambda x: x.get('height', 0))
-                        worst = min(video_formats, key=lambda x: x.get('height', 0))
-                        
+
+                    # Match UI labels to the same direct streamable format logic as /download.
+                    best = _select_direct_video_format(formats, 'best')
+                    worst = _select_direct_video_format(formats, 'worst')
+                    if best or worst:
+                        best_height = (best or {}).get('height')
+                        worst_height = (worst or {}).get('height')
                         return {
-                            'best_quality': f"{best.get('height', '?')}p",
-                            'worst_quality': f"{worst.get('height', '?')}p",
+                            'best_quality': f"{best_height}p" if best_height else 'Best',
+                            'worst_quality': f"{worst_height}p" if worst_height else 'Low',
                         }
                     
                     return {'best_quality': 'HD', 'worst_quality': 'SD'}
@@ -615,4 +658,3 @@ def get_formats():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
-
