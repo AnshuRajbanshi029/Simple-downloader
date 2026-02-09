@@ -841,19 +841,21 @@
                 loader.classList.add('active');
                 submitBtn.disabled = true;
             });
-
-            // Fetch quality info if video card exists
-            {% if video_info and not video_info.is_spotify %}
-            fetch('/get_formats?url={{ url | urlencode }}')
-                .then(r => r.json())
-                .then(data => {
-                    if (data.best_quality) document.getElementById('bestQuality').textContent = data.best_quality;
-                    if (data.worst_quality) document.getElementById('worstQuality').textContent = data.worst_quality;
-                })
-                .catch(() => { });
-            {% endif %}
         });
     </script>
+
+    {% if video_info and not video_info.is_spotify %}
+    <script>
+        // Fetch quality info for video
+        fetch('/get_formats?url={{ url | urlencode }}')
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.best_quality) document.getElementById('bestQuality').textContent = data.best_quality;
+                if (data.worst_quality) document.getElementById('worstQuality').textContent = data.worst_quality;
+            })
+            .catch(function () { });
+    </script>
+    {% endif %}
 </body>
 
 </html>
