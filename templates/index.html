@@ -765,21 +765,11 @@
 
                 <div class="channel-info">
                     <div class="channel-avatar">
-                        {% if video_info.channel_url or video_info.uploader_url %}
-                        {% set avatar_url = video_info.get('channel', {}).get('thumbnails', [{}])[0].get('url') or
-                        video_info.get('uploader_thumbnail') or video_info.get('artist_image') %}
-                        {% if avatar_url %}
-                        <img src="{{ avatar_url }}" alt="Channel"
+                        {% if video_info.artist_image %}
+                        <img src="{{ video_info.artist_image }}" alt="Avatar"
                             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
                         <span style="display:none;">{{ (video_info.uploader or video_info.channel or '?')[:1].upper()
                             }}</span>
-                        {% else %}
-                        <span>{{ (video_info.uploader or video_info.channel or '?')[:1].upper() }}</span>
-                        {% endif %}
-                        {% elif video_info.artist_image %}
-                        <img src="{{ video_info.artist_image }}" alt="Artist"
-                            onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                        <span style="display:none;">{{ (video_info.uploader or '?')[:1].upper() }}</span>
                         {% else %}
                         <span>{{ (video_info.uploader or video_info.channel or '?')[:1].upper() }}</span>
                         {% endif %}
