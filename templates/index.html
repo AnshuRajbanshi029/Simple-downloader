@@ -27,7 +27,6 @@
             --text-secondary: #c4c4d4;
             --facebook-blue: #1877F2;
             --instagram-pink: #E4405F;
-            --loader-color: linear-gradient(135deg, var(--lavender), var(--powder-blue), var(--soft-peach));
         }
 
         body {
@@ -73,7 +72,6 @@
             font-size: 1.2rem;
         }
 
-        /* Platform Icons */
         .platform-icons {
             display: flex;
             justify-content: center;
@@ -178,6 +176,7 @@
             align-items: center;
             justify-content: center;
             gap: 12px;
+            text-decoration: none;
         }
 
         .btn-primary {
@@ -357,11 +356,76 @@
         }
 
         .download-icon {
-            width: 26px;
-            height: 26px;
+            width: 24px;
+            height: 24px;
         }
 
-        /* Loading Animation */
+        /* Download Options Grid */
+        .download-options {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        .download-section {
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 16px;
+            padding: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .download-section-title {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .download-btn-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .btn-small {
+            padding: 14px 18px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            text-decoration: none;
+            color: #1a1a2e;
+        }
+
+        .btn-video {
+            background: linear-gradient(135deg, var(--soft-peach), var(--peach-dark));
+        }
+
+        .btn-audio {
+            background: linear-gradient(135deg, var(--powder-blue), var(--lavender));
+        }
+
+        .btn-small:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+        }
+
+        .quality-label {
+            font-size: 0.8rem;
+            background: rgba(0, 0, 0, 0.15);
+            padding: 4px 10px;
+            border-radius: 8px;
+        }
+
+        /* Loading Animation - Fixed positioning */
         .loader-overlay {
             display: none;
             position: fixed;
@@ -369,13 +433,13 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(15, 15, 35, 0.9);
-            backdrop-filter: blur(8px);
+            background: rgba(15, 15, 35, 0.95);
+            backdrop-filter: blur(10px);
             z-index: 1000;
             justify-content: center;
             align-items: center;
             flex-direction: column;
-            gap: 28px;
+            gap: 32px;
         }
 
         .loader-overlay.active {
@@ -386,8 +450,6 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            --color: var(--lavender);
-            --animation: 2s ease-in-out infinite;
         }
 
         .loader .circle {
@@ -395,90 +457,83 @@
             align-items: center;
             justify-content: center;
             position: relative;
-            width: 24px;
-            height: 24px;
-            border: solid 2px var(--color);
+            width: 22px;
+            height: 22px;
+            border: solid 2px currentColor;
             border-radius: 50%;
-            margin: 0 12px;
+            margin: 0 10px;
             background-color: transparent;
-            animation: circle-keys var(--animation);
+            animation: circle-keys 2s ease-in-out infinite;
         }
 
         .loader .circle .dot {
             position: absolute;
+            top: 50%;
+            left: 50%;
             transform: translate(-50%, -50%);
-            width: 18px;
-            height: 18px;
+            width: 14px;
+            height: 14px;
             border-radius: 50%;
-            background-color: var(--color);
-            animation: dot-keys var(--animation);
+            background-color: currentColor;
+            animation: dot-keys 2s ease-in-out infinite;
         }
 
         .loader .circle .outline {
             position: absolute;
+            top: 50%;
+            left: 50%;
             transform: translate(-50%, -50%);
-            width: 24px;
-            height: 24px;
+            width: 22px;
+            height: 22px;
             border-radius: 50%;
-            animation: outline-keys var(--animation);
+            animation: outline-keys 2s ease-in-out infinite;
         }
 
         .circle:nth-child(1) {
-            --color: var(--lavender);
+            color: var(--lavender);
         }
 
         .circle:nth-child(2) {
-            --color: var(--powder-blue);
-            animation-delay: 0.3s;
+            color: var(--powder-blue);
+            animation-delay: 0.25s;
         }
 
         .circle:nth-child(3) {
-            --color: var(--soft-peach);
-            animation-delay: 0.6s;
+            color: var(--soft-peach);
+            animation-delay: 0.5s;
         }
 
         .circle:nth-child(4) {
-            --color: var(--lavender);
-            animation-delay: 0.9s;
-        }
-
-        .circle:nth-child(1) .dot {
-            background-color: var(--lavender);
+            color: var(--lavender);
+            animation-delay: 0.75s;
         }
 
         .circle:nth-child(2) .dot {
-            background-color: var(--powder-blue);
-            animation-delay: 0.3s;
+            animation-delay: 0.25s;
         }
 
         .circle:nth-child(3) .dot {
-            background-color: var(--soft-peach);
-            animation-delay: 0.6s;
+            animation-delay: 0.5s;
         }
 
         .circle:nth-child(4) .dot {
-            background-color: var(--lavender);
-            animation-delay: 0.9s;
+            animation-delay: 0.75s;
         }
 
         .circle:nth-child(1) .outline {
-            animation-delay: 0.9s;
-            --color: var(--lavender);
+            animation-delay: 0.75s;
         }
 
         .circle:nth-child(2) .outline {
-            animation-delay: 1.2s;
-            --color: var(--powder-blue);
+            animation-delay: 1s;
         }
 
         .circle:nth-child(3) .outline {
-            animation-delay: 1.5s;
-            --color: var(--soft-peach);
+            animation-delay: 1.25s;
         }
 
         .circle:nth-child(4) .outline {
-            animation-delay: 1.8s;
-            --color: var(--lavender);
+            animation-delay: 1.5s;
         }
 
         .loader-text {
@@ -488,48 +543,43 @@
         }
 
         @keyframes circle-keys {
-            0% {
+
+            0%,
+            100% {
                 transform: scale(1);
                 opacity: 1;
             }
 
             50% {
-                transform: scale(1.5);
-                opacity: 0.5;
-            }
-
-            100% {
-                transform: scale(1);
-                opacity: 1;
+                transform: scale(1.4);
+                opacity: 0.6;
             }
         }
 
         @keyframes dot-keys {
-            0% {
-                transform: scale(1);
+
+            0%,
+            100% {
+                transform: translate(-50%, -50%) scale(1);
             }
 
             50% {
-                transform: scale(0);
-            }
-
-            100% {
-                transform: scale(1);
+                transform: translate(-50%, -50%) scale(0);
             }
         }
 
         @keyframes outline-keys {
             0% {
-                transform: scale(0);
-                outline: solid 20px var(--color);
+                transform: translate(-50%, -50%) scale(0);
+                outline: solid 18px currentColor;
                 outline-offset: 0;
                 opacity: 1;
             }
 
             100% {
-                transform: scale(1);
+                transform: translate(-50%, -50%) scale(1);
                 outline: solid 0 transparent;
-                outline-offset: 20px;
+                outline-offset: 18px;
                 opacity: 0;
             }
         }
@@ -600,6 +650,10 @@
                 width: 48px;
                 height: 48px;
             }
+
+            .download-options {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
@@ -634,7 +688,6 @@
             <p>Download from YouTube, TikTok, Facebook, Instagram & Spotify</p>
         </div>
 
-        <!-- Platform Icons -->
         <div class="platform-icons">
             <div class="platform-icon youtube" data-name="YouTube">
                 <svg width="26" height="26" viewBox="0 0 24 24" fill="#FF0000">
@@ -655,16 +708,16 @@
                 </svg>
             </div>
             <div class="platform-icon instagram" data-name="Instagram">
-                <svg width="26" height="26" viewBox="0 0 24 24" fill="url(#instagram-gradient)">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="url(#ig-grad)">
                     <defs>
-                        <linearGradient id="instagram-gradient" x1="0%" y1="100%" x2="100%" y2="0%">
+                        <linearGradient id="ig-grad" x1="0%" y1="100%" x2="100%" y2="0%">
                             <stop offset="0%" style="stop-color:#FFDC80" />
                             <stop offset="50%" style="stop-color:#F56040" />
                             <stop offset="100%" style="stop-color:#833AB4" />
                         </linearGradient>
                     </defs>
                     <path
-                        d="M12 0C8.74 0 8.333.015 7.053.072 5.775.132 4.905.333 4.14.63c-.789.306-1.459.717-2.126 1.384S.935 3.35.63 4.14C.333 4.905.131 5.775.072 7.053.012 8.333 0 8.74 0 12s.015 3.667.072 4.947c.06 1.277.261 2.148.558 2.913.306.788.717 1.459 1.384 2.126.667.666 1.336 1.079 2.126 1.384.766.296 1.636.499 2.913.558C8.333 23.988 8.74 24 12 24s3.667-.015 4.947-.072c1.277-.06 2.148-.262 2.148-.262 2.913-.558.788-.306 1.459-.718 2.126-1.384.666-.667 1.079-1.335 1.384-2.126.296-.765.499-1.636.558-2.913.06-1.28.072-1.687.072-4.947s-.015-3.667-.072-4.947c-.06-1.277-.262-2.149-.558-2.913-.306-.789-.718-1.459-1.384-2.126C21.319 1.347 20.651.935 19.86.63c-.765-.297-1.636-.499-2.913-.558C15.667.012 15.26 0 12 0zm0 2.16c3.203 0 3.585.016 4.85.071 1.17.055 1.805.249 2.227.415.562.217.96.477 1.382.896.419.42.679.819.896 1.381.164.422.36 1.057.413 2.227.057 1.266.07 1.646.07 4.85s-.015 3.585-.074 4.85c-.061 1.17-.256 1.805-.421 2.227-.224.562-.479.96-.899 1.382-.419.419-.824.679-1.38.896-.42.164-1.065.36-2.235.413-1.274.057-1.649.07-4.859.07-3.211 0-3.586-.015-4.859-.074-1.171-.061-1.816-.256-2.236-.421-.569-.224-.96-.479-1.379-.899-.421-.419-.69-.824-.9-1.38-.165-.42-.359-1.065-.42-2.235-.045-1.26-.061-1.649-.061-4.844 0-3.196.016-3.586.061-4.861.061-1.17.255-1.814.42-2.234.21-.57.479-.96.9-1.381.419-.419.81-.689 1.379-.898.42-.166 1.051-.361 2.221-.421 1.275-.045 1.65-.06 4.859-.06l.045.03zm0 3.678c-3.405 0-6.162 2.76-6.162 6.162 0 3.405 2.76 6.162 6.162 6.162 3.405 0 6.162-2.76 6.162-6.162 0-3.405-2.757-6.162-6.162-6.162zM12 16c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4zm7.846-10.405c0 .795-.646 1.44-1.44 1.44-.795 0-1.44-.646-1.44-1.44 0-.794.646-1.439 1.44-1.439.793-.001 1.44.645 1.44 1.439z" />
+                        d="M12 0C8.74 0 8.333.015 7.053.072 5.775.132 4.905.333 4.14.63c-.789.306-1.459.717-2.126 1.384S.935 3.35.63 4.14C.333 4.905.131 5.775.072 7.053.012 8.333 0 8.74 0 12s.015 3.667.072 4.947c.06 1.277.261 2.148.558 2.913.306.788.717 1.459 1.384 2.126.667.666 1.336 1.079 2.126 1.384.766.296 1.636.499 2.913.558C8.333 23.988 8.74 24 12 24s3.667-.015 4.947-.072c1.277-.06 2.148-.262 2.913-.558.788-.306 1.459-.718 2.126-1.384.666-.667 1.079-1.335 1.384-2.126.296-.765.499-1.636.558-2.913.06-1.28.072-1.687.072-4.947s-.015-3.667-.072-4.947c-.06-1.277-.262-2.149-.558-2.913-.306-.789-.718-1.459-1.384-2.126C21.319 1.347 20.651.935 19.86.63c-.765-.297-1.636-.499-2.913-.558C15.667.012 15.26 0 12 0zm0 2.16c3.203 0 3.585.016 4.85.071 1.17.055 1.805.249 2.227.415.562.217.96.477 1.382.896.419.42.679.819.896 1.381.164.422.36 1.057.413 2.227.057 1.266.07 1.646.07 4.85s-.015 3.585-.074 4.85c-.061 1.17-.256 1.805-.421 2.227-.224.562-.479.96-.899 1.382-.419.419-.824.679-1.38.896-.42.164-1.065.36-2.235.413-1.274.057-1.649.07-4.859.07-3.211 0-3.586-.015-4.859-.074-1.171-.061-1.816-.256-2.236-.421-.569-.224-.96-.479-1.379-.899-.421-.419-.69-.824-.9-1.38-.165-.42-.359-1.065-.42-2.235-.045-1.26-.061-1.649-.061-4.844 0-3.196.016-3.586.061-4.861.061-1.17.255-1.814.42-2.234.21-.57.479-.96.9-1.381.419-.419.81-.689 1.379-.898.42-.166 1.051-.361 2.221-.421 1.275-.045 1.65-.06 4.859-.06l.045.03zm0 3.678c-3.405 0-6.162 2.76-6.162 6.162 0 3.405 2.76 6.162 6.162 6.162 3.405 0 6.162-2.76 6.162-6.162 0-3.405-2.757-6.162-6.162-6.162zM12 16c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4zm7.846-10.405c0 .795-.646 1.44-1.44 1.44-.795 0-1.44-.646-1.44-1.44 0-.794.646-1.439 1.44-1.439.793-.001 1.44.645 1.44 1.439z" />
                 </svg>
             </div>
             <div class="platform-icon spotify" data-name="Spotify">
@@ -680,7 +733,6 @@
                 <input type="text" name="url" id="urlInput" class="input-field"
                     placeholder="Paste any video or Spotify URL here..." value="{{ url if url else '' }}" required>
             </div>
-
             <button type="submit" class="btn btn-primary" id="submitBtn">
                 <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none"
                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -692,9 +744,7 @@
         </form>
 
         {% if error %}
-        <div class="error-box">
-            {{ error }}
-        </div>
+        <div class="error-box">{{ error }}</div>
         {% endif %}
 
         {% if video_info %}
@@ -707,56 +757,84 @@
                 {% endif %}
             </div>
             <div class="video-info">
-                <!-- Platform Badge -->
                 {% if platform_id %}
-                <span class="platform-badge {{ platform_id }}">
-                    {{ platform.icon }} {{ platform.name }}
-                </span>
+                <span class="platform-badge {{ platform_id }}">{{ platform.icon }} {{ platform.name }}</span>
                 {% endif %}
 
                 <h2 class="video-title">{{ video_info.title }}</h2>
 
                 <div class="channel-info">
                     <div class="channel-avatar">
-                        {% if video_info.artist_image %}
-                        <img src="{{ video_info.artist_image }}" alt="Artist image"
+                        {% if video_info.channel_url or video_info.uploader_url %}
+                        {% set avatar_url = video_info.get('channel', {}).get('thumbnails', [{}])[0].get('url') or
+                        video_info.get('uploader_thumbnail') or video_info.get('artist_image') %}
+                        {% if avatar_url %}
+                        <img src="{{ avatar_url }}" alt="Channel"
                             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                        <span class="avatar-placeholder" style="display: none;">{{ video_info.uploader[:1].upper() if
-                            video_info.uploader else '?' }}</span>
+                        <span style="display:none;">{{ (video_info.uploader or video_info.channel or '?')[:1].upper()
+                            }}</span>
                         {% else %}
-                        <span class="avatar-placeholder">{{ video_info.uploader[:1].upper() if video_info.uploader else
-                            '?' }}</span>
+                        <span>{{ (video_info.uploader or video_info.channel or '?')[:1].upper() }}</span>
+                        {% endif %}
+                        {% elif video_info.artist_image %}
+                        <img src="{{ video_info.artist_image }}" alt="Artist"
+                            onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                        <span style="display:none;">{{ (video_info.uploader or '?')[:1].upper() }}</span>
+                        {% else %}
+                        <span>{{ (video_info.uploader or video_info.channel or '?')[:1].upper() }}</span>
                         {% endif %}
                     </div>
                     <div class="channel-details">
-                        <div class="channel-name">{{ video_info.uploader or 'Unknown' }}</div>
+                        <div class="channel-name">{{ video_info.uploader or video_info.channel or 'Unknown' }}</div>
                         {% if video_info.view_count %}
-                        <div class="video-meta">{{ video_info.view_count | int | filesizeformat }} views</div>
+                        <div class="video-meta">{{ "{:,}".format(video_info.view_count | int) }} views</div>
                         {% endif %}
                     </div>
                 </div>
 
-                <!-- Download Buttons -->
                 {% if video_info.is_spotify %}
                 <a href="{{ video_info.spotify_url or url }}" target="_blank" class="btn btn-download"
                     style="background: linear-gradient(135deg, #1DB954, #1ed760); color: white;">
                     <svg class="download-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                        <polyline points="7 10 12 15 17 10"></polyline>
-                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="7 10 12 15 17 10" />
+                        <line x1="12" y1="15" x2="12" y2="3" />
                     </svg>
                     Open in Spotify
                 </a>
                 {% else %}
-                <a href="{{ url_for('download', url=url) }}" target="_blank" class="btn btn-download">
-                    <svg class="download-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
-                        stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                        <polyline points="7 10 12 15 17 10"></polyline>
-                        <line x1="12" y1="15" x2="12" y2="3"></line>
-                    </svg>
-                    Download Video
-                </a>
+                <div class="download-options">
+                    <div class="download-section">
+                        <div class="download-section-title">📹 Video Download</div>
+                        <div class="download-btn-group">
+                            <a href="{{ url_for('download', url=url, quality='best') }}" target="_blank"
+                                class="btn-small btn-video">
+                                Highest Quality
+                                <span class="quality-label" id="bestQuality">HD</span>
+                            </a>
+                            <a href="{{ url_for('download', url=url, quality='worst') }}" target="_blank"
+                                class="btn-small btn-video">
+                                Lowest Quality
+                                <span class="quality-label" id="worstQuality">SD</span>
+                            </a>
+                        </div>
+                    </div>
+                    <div class="download-section">
+                        <div class="download-section-title">🎵 Audio Download</div>
+                        <div class="download-btn-group">
+                            <a href="{{ url_for('download_audio', url=url, format='mp3') }}" target="_blank"
+                                class="btn-small btn-audio">
+                                MP3 Format
+                                <span class="quality-label">.mp3</span>
+                            </a>
+                            <a href="{{ url_for('download_audio', url=url, format='wav') }}" target="_blank"
+                                class="btn-small btn-audio">
+                                WAV Format
+                                <span class="quality-label">.wav</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
                 {% endif %}
             </div>
         </div>
@@ -773,6 +851,17 @@
                 loader.classList.add('active');
                 submitBtn.disabled = true;
             });
+
+            // Fetch quality info if video card exists
+            {% if video_info and not video_info.is_spotify %}
+            fetch('/get_formats?url={{ url | urlencode }}')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.best_quality) document.getElementById('bestQuality').textContent = data.best_quality;
+                    if (data.worst_quality) document.getElementById('worstQuality').textContent = data.worst_quality;
+                })
+                .catch(() => { });
+            {% endif %}
         });
     </script>
 </body>

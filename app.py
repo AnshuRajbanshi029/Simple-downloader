@@ -412,16 +412,115 @@ def index():
 @app.route('/download')
 def download():
     video_url = request.args.get('url')
+    quality = request.args.get('quality', 'best')  # 'best' or 'worst'
     
     if not video_url:
         return redirect(url_for('index'))
 
     try:
-        info = extract_video_info(video_url)
-        return redirect(info['url'])
+        shuffled_proxies = PROXIES.copy()
+        random.shuffle(shuffled_proxies)
+        
+        # Set format based on quality
+        if quality == 'worst':
+            format_str = 'worst[ext=mp4]/worst'
+        else:
+            format_str = 'best[ext=mp4]/best'
+        
+        for proxy in shuffled_proxies:
+            try:
+                ydl_opts = {
+                    'format': format_str,
+                    'proxy': f"http://{proxy}",
+                    'quiet': True,
+                    'no_warnings': True,
+                }
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(video_url, download=False)
+                    return redirect(info['url'])
+            except Exception:
+                continue
+        
+        return "Error: All proxies failed", 500
     except Exception as e:
         return f"Error: {e}", 500
+
+
+@app.route('/download_audio')
+def download_audio():
+    video_url = request.args.get('url')
+    audio_format = request.args.get('format', 'mp3')  # 'mp3' or 'wav'
+    
+    if not video_url:
+        return redirect(url_for('index'))
+
+    try:
+        shuffled_proxies = PROXIES.copy()
+        random.shuffle(shuffled_proxies)
+        
+        for proxy in shuffled_proxies:
+            try:
+                ydl_opts = {
+                    'format': 'bestaudio/best',
+                    'proxy': f"http://{proxy}",
+                    'quiet': True,
+                    'no_warnings': True,
+                }
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(video_url, download=False)
+                    return redirect(info['url'])
+            except Exception:
+                continue
+        
+        return "Error: All proxies failed", 500
+    except Exception as e:
+        return f"Error: {e}", 500
+
+
+@app.route('/get_formats')
+def get_formats():
+    """Get available video formats for a URL"""
+    video_url = request.args.get('url')
+    
+    if not video_url:
+        return {'error': 'No URL provided'}, 400
+
+    try:
+        shuffled_proxies = PROXIES.copy()
+        random.shuffle(shuffled_proxies)
+        
+        for proxy in shuffled_proxies:
+            try:
+                ydl_opts = {
+                    'proxy': f"http://{proxy}",
+                    'quiet': True,
+                    'no_warnings': True,
+                }
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(video_url, download=False)
+                    formats = info.get('formats', [])
+                    
+                    # Find best and worst video resolutions
+                    video_formats = [f for f in formats if f.get('height') and f.get('vcodec') != 'none']
+                    if video_formats:
+                        best = max(video_formats, key=lambda x: x.get('height', 0))
+                        worst = min(video_formats, key=lambda x: x.get('height', 0))
+                        
+                        return {
+                            'best_quality': f"{best.get('height', '?')}p",
+                            'worst_quality': f"{worst.get('height', '?')}p",
+                        }
+                    
+                    return {'best_quality': 'HD', 'worst_quality': 'SD'}
+            except Exception:
+                continue
+        
+        return {'best_quality': 'HD', 'worst_quality': 'SD'}
+    except Exception:
+        return {'best_quality': 'HD', 'worst_quality': 'SD'}
+
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
+
