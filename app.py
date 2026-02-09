@@ -23,6 +23,30 @@ def get_random_proxy():
     proxy = random.choice(PROXIES)
     return f"http://{proxy}"
 
+def extract_video_info(video_url):
+    """Try all proxies until one succeeds."""
+    shuffled_proxies = PROXIES.copy()
+    random.shuffle(shuffled_proxies)
+    
+    last_error = None
+    for proxy in shuffled_proxies:
+        try:
+            ydl_opts = {
+                'format': 'best',
+                'proxy': f"http://{proxy}",
+                'quiet': True,
+                'no_warnings': True,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(video_url, download=False)
+                return info  # Success!
+        except Exception as e:
+            last_error = e
+            continue  # Try next proxy
+    
+    # All proxies failed
+    raise last_error if last_error else Exception("All proxies failed")
+
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
@@ -31,15 +55,9 @@ def index():
             return render_template('index.html', error="Please enter a URL")
         
         try:
-            # We'll just stream it directly to the user
-            # Getting info first to get the title and direct URL
-            ydl_opts = {
-                'format': 'best',
-                'proxy': get_random_proxy(),
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(video_url, download=False)
-                return render_template('index.html', video_info=info, url=video_url)
+            # Use retry function that tries all proxies
+            info = extract_video_info(video_url)
+            return render_template('index.html', video_info=info, url=video_url)
         except Exception as e:
             return render_template('index.html', error=str(e))
             
@@ -52,37 +70,9 @@ def download():
         return redirect(url_for('index'))
 
     try:
-        # Stream the download
-        def generate():
-            ydl_opts = {
-                'format': 'best',
-                'quiet': True,
-                'no_warnings': True,
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(video_url, download=False)
-                download_url = info['url']
-                title = info.get('title', 'video')
-                ext = info.get('ext', 'mp4')
-                
-                # We can redirect to the direct URL if it's accessible (often faster)
-                # But sometimes it's IP locked. Let's try redirecting first for speed.
-                # If that fails, we'd need a proxy solution which is complex.
-                # Direct redirect is the "fastest" valid approach for a simple tool.
-                return redirect(download_url)
-                
-        # Actually, for a robust "hosting" solution, we might want to proxy it if redirect fails.
-        # But for "simple" and "fast" in Python, let's stick to getting the direct URL and redirecting.
-        # It puts the bandwidth on the client, not the server.
-        
-        ydl_opts = {
-            'format': 'best',
-            'proxy': get_random_proxy(),
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(video_url, download=False)
-            return redirect(info['url'])
-            
+        # Use retry function that tries all proxies
+        info = extract_video_info(video_url)
+        return redirect(info['url'])
     except Exception as e:
         return f"Error: {e}"
 
