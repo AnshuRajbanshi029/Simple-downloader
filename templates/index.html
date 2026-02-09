@@ -25,9 +25,9 @@
             --bg-gradient-end: #0f0f23;
             --text-primary: #ffffff;
             --text-secondary: #c4c4d4;
-
             --facebook-blue: #1877F2;
             --instagram-pink: #E4405F;
+            --loader-color: linear-gradient(135deg, var(--lavender), var(--powder-blue), var(--soft-peach));
         }
 
         body {
@@ -37,14 +37,14 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 40px 20px;
+            padding: 60px 40px;
             color: var(--text-primary);
         }
 
         .container {
             width: 100%;
-            max-width: 800px;
-            padding: 48px;
+            max-width: 900px;
+            padding: 56px 64px;
             background: rgba(255, 255, 255, 0.03);
             backdrop-filter: blur(20px);
             border-radius: 32px;
@@ -54,40 +54,41 @@
 
         .header {
             text-align: center;
-            margin-bottom: 32px;
+            margin-bottom: 40px;
         }
 
         .header h1 {
-            font-size: 2.8rem;
+            font-size: 3.2rem;
             font-weight: 700;
             background: linear-gradient(135deg, var(--lavender), var(--powder-blue), var(--soft-peach));
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
-            margin-bottom: 12px;
+            margin-bottom: 14px;
+            letter-spacing: -0.5px;
         }
 
         .header p {
             color: var(--text-secondary);
-            font-size: 1.1rem;
+            font-size: 1.2rem;
         }
 
         /* Platform Icons */
         .platform-icons {
             display: flex;
             justify-content: center;
-            gap: 16px;
-            margin-bottom: 28px;
+            gap: 20px;
+            margin-bottom: 36px;
         }
 
         .platform-icon {
-            width: 48px;
-            height: 48px;
-            border-radius: 12px;
+            width: 56px;
+            height: 56px;
+            border-radius: 14px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 1.5rem;
+            font-size: 1.6rem;
             transition: all 0.3s ease;
             cursor: default;
             position: relative;
@@ -96,10 +97,10 @@
         .platform-icon::after {
             content: attr(data-name);
             position: absolute;
-            bottom: -24px;
+            bottom: -28px;
             left: 50%;
             transform: translateX(-50%);
-            font-size: 0.7rem;
+            font-size: 0.75rem;
             color: var(--text-secondary);
             white-space: nowrap;
             opacity: 0;
@@ -135,22 +136,21 @@
             border: 1px solid rgba(29, 185, 84, 0.3);
         }
 
-
         .platform-icon:hover {
-            transform: translateY(-3px);
+            transform: translateY(-4px);
         }
 
         .form-group {
-            margin-bottom: 24px;
+            margin-bottom: 28px;
         }
 
         .input-field {
             width: 100%;
-            padding: 20px 28px;
-            font-size: 1.1rem;
+            padding: 22px 32px;
+            font-size: 1.15rem;
             background: rgba(255, 255, 255, 0.05);
             border: 2px solid rgba(255, 255, 255, 0.1);
-            border-radius: 16px;
+            border-radius: 18px;
             color: var(--text-primary);
             transition: all 0.3s ease;
         }
@@ -162,22 +162,22 @@
         .input-field:focus {
             outline: none;
             border-color: var(--lavender);
-            box-shadow: 0 0 20px rgba(230, 224, 248, 0.2);
+            box-shadow: 0 0 24px rgba(230, 224, 248, 0.2);
         }
 
         .btn {
             width: 100%;
-            padding: 20px;
-            font-size: 1.2rem;
+            padding: 22px;
+            font-size: 1.25rem;
             font-weight: 600;
             border: none;
-            border-radius: 16px;
+            border-radius: 18px;
             cursor: pointer;
             transition: all 0.3s ease;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 10px;
+            gap: 12px;
         }
 
         .btn-primary {
@@ -187,7 +187,13 @@
 
         .btn-primary:hover {
             transform: translateY(-3px);
-            box-shadow: 0 12px 30px rgba(184, 212, 232, 0.3);
+            box-shadow: 0 14px 35px rgba(184, 212, 232, 0.3);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+            transform: none;
         }
 
         .btn-download {
@@ -197,24 +203,24 @@
 
         .btn-download:hover {
             transform: translateY(-3px);
-            box-shadow: 0 12px 30px rgba(255, 216, 204, 0.3);
+            box-shadow: 0 14px 35px rgba(255, 216, 204, 0.3);
         }
 
-
         .error-box {
-            margin-top: 24px;
-            padding: 20px;
+            margin-top: 28px;
+            padding: 22px;
             background: rgba(255, 100, 100, 0.1);
             border: 1px solid rgba(255, 100, 100, 0.3);
-            border-radius: 16px;
+            border-radius: 18px;
             color: #ffb3b3;
             text-align: center;
+            font-size: 1.05rem;
         }
 
         .video-card {
-            margin-top: 40px;
+            margin-top: 48px;
             background: rgba(255, 255, 255, 0.04);
-            border-radius: 24px;
+            border-radius: 28px;
             overflow: hidden;
             border: 1px solid rgba(255, 255, 255, 0.08);
         }
@@ -222,12 +228,12 @@
         .platform-badge {
             display: inline-flex;
             align-items: center;
-            gap: 6px;
-            padding: 6px 14px;
-            border-radius: 20px;
-            font-size: 0.85rem;
+            gap: 8px;
+            padding: 8px 18px;
+            border-radius: 24px;
+            font-size: 0.95rem;
             font-weight: 600;
-            margin-bottom: 12px;
+            margin-bottom: 14px;
         }
 
         .platform-badge.youtube {
@@ -255,8 +261,6 @@
             color: #1DB954;
         }
 
-
-
         .thumbnail-container {
             position: relative;
             width: 100%;
@@ -269,28 +273,31 @@
             width: 100%;
             height: 100%;
             object-fit: cover;
+            image-rendering: -webkit-optimize-contrast;
+            image-rendering: crisp-edges;
         }
 
         .duration-badge {
             position: absolute;
-            bottom: 12px;
-            right: 12px;
-            background: rgba(0, 0, 0, 0.85);
+            bottom: 14px;
+            right: 14px;
+            background: rgba(0, 0, 0, 0.9);
             color: white;
-            padding: 6px 12px;
-            border-radius: 8px;
-            font-size: 0.95rem;
+            padding: 8px 14px;
+            border-radius: 10px;
+            font-size: 1rem;
             font-weight: 600;
+            backdrop-filter: blur(8px);
         }
 
         .video-info {
-            padding: 28px;
+            padding: 32px;
         }
 
         .video-title {
-            font-size: 1.5rem;
+            font-size: 1.7rem;
             font-weight: 600;
-            margin-bottom: 16px;
+            margin-bottom: 18px;
             line-height: 1.4;
             display: -webkit-box;
             -webkit-line-clamp: 2;
@@ -302,25 +309,26 @@
         .channel-info {
             display: flex;
             align-items: center;
-            gap: 14px;
-            margin-bottom: 24px;
-            padding: 16px;
+            gap: 16px;
+            margin-bottom: 28px;
+            padding: 18px;
             background: rgba(255, 255, 255, 0.04);
-            border-radius: 12px;
+            border-radius: 14px;
         }
 
         .channel-avatar {
-            width: 48px;
-            height: 48px;
+            width: 56px;
+            height: 56px;
             border-radius: 50%;
             background: linear-gradient(135deg, var(--lavender), var(--powder-blue));
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 1.3rem;
+            font-size: 1.4rem;
             font-weight: 700;
             color: #1a1a2e;
             flex-shrink: 0;
+            overflow: hidden;
         }
 
         .channel-avatar img {
@@ -329,6 +337,7 @@
             object-fit: cover;
             border-radius: 50%;
             display: block;
+            image-rendering: -webkit-optimize-contrast;
         }
 
         .channel-details {
@@ -336,36 +345,218 @@
         }
 
         .channel-name {
-            font-size: 1.1rem;
+            font-size: 1.15rem;
             font-weight: 600;
             color: var(--text-primary);
         }
 
         .video-meta {
-            font-size: 0.95rem;
+            font-size: 1rem;
             color: var(--text-secondary);
-            margin-top: 4px;
+            margin-top: 6px;
         }
 
         .download-icon {
-            width: 24px;
-            height: 24px;
+            width: 26px;
+            height: 26px;
         }
 
-        .spotify-note {
-            margin-top: 12px;
-            padding: 12px 16px;
-            background: rgba(29, 185, 84, 0.1);
-            border: 1px solid rgba(29, 185, 84, 0.2);
-            border-radius: 12px;
-            font-size: 0.9rem;
-            color: #1DB954;
-            text-align: center;
+        /* Loading Animation */
+        .loader-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(15, 15, 35, 0.9);
+            backdrop-filter: blur(8px);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            gap: 28px;
+        }
+
+        .loader-overlay.active {
+            display: flex;
+        }
+
+        .loader {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            --color: var(--lavender);
+            --animation: 2s ease-in-out infinite;
+        }
+
+        .loader .circle {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            width: 24px;
+            height: 24px;
+            border: solid 2px var(--color);
+            border-radius: 50%;
+            margin: 0 12px;
+            background-color: transparent;
+            animation: circle-keys var(--animation);
+        }
+
+        .loader .circle .dot {
+            position: absolute;
+            transform: translate(-50%, -50%);
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background-color: var(--color);
+            animation: dot-keys var(--animation);
+        }
+
+        .loader .circle .outline {
+            position: absolute;
+            transform: translate(-50%, -50%);
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            animation: outline-keys var(--animation);
+        }
+
+        .circle:nth-child(1) {
+            --color: var(--lavender);
+        }
+
+        .circle:nth-child(2) {
+            --color: var(--powder-blue);
+            animation-delay: 0.3s;
+        }
+
+        .circle:nth-child(3) {
+            --color: var(--soft-peach);
+            animation-delay: 0.6s;
+        }
+
+        .circle:nth-child(4) {
+            --color: var(--lavender);
+            animation-delay: 0.9s;
+        }
+
+        .circle:nth-child(1) .dot {
+            background-color: var(--lavender);
+        }
+
+        .circle:nth-child(2) .dot {
+            background-color: var(--powder-blue);
+            animation-delay: 0.3s;
+        }
+
+        .circle:nth-child(3) .dot {
+            background-color: var(--soft-peach);
+            animation-delay: 0.6s;
+        }
+
+        .circle:nth-child(4) .dot {
+            background-color: var(--lavender);
+            animation-delay: 0.9s;
+        }
+
+        .circle:nth-child(1) .outline {
+            animation-delay: 0.9s;
+            --color: var(--lavender);
+        }
+
+        .circle:nth-child(2) .outline {
+            animation-delay: 1.2s;
+            --color: var(--powder-blue);
+        }
+
+        .circle:nth-child(3) .outline {
+            animation-delay: 1.5s;
+            --color: var(--soft-peach);
+        }
+
+        .circle:nth-child(4) .outline {
+            animation-delay: 1.8s;
+            --color: var(--lavender);
+        }
+
+        .loader-text {
+            font-size: 1.2rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        @keyframes circle-keys {
+            0% {
+                transform: scale(1);
+                opacity: 1;
+            }
+
+            50% {
+                transform: scale(1.5);
+                opacity: 0.5;
+            }
+
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        @keyframes dot-keys {
+            0% {
+                transform: scale(1);
+            }
+
+            50% {
+                transform: scale(0);
+            }
+
+            100% {
+                transform: scale(1);
+            }
+        }
+
+        @keyframes outline-keys {
+            0% {
+                transform: scale(0);
+                outline: solid 20px var(--color);
+                outline-offset: 0;
+                opacity: 1;
+            }
+
+            100% {
+                transform: scale(1);
+                outline: solid 0 transparent;
+                outline-offset: 20px;
+                opacity: 0;
+            }
+        }
+
+        /* Desktop enhancements */
+        @media (min-width: 1200px) {
+            .container {
+                max-width: 1000px;
+                padding: 64px 80px;
+            }
+
+            .header h1 {
+                font-size: 3.6rem;
+            }
+
+            .video-title {
+                font-size: 1.9rem;
+            }
         }
 
         @media (max-width: 600px) {
+            body {
+                padding: 20px 16px;
+            }
+
             .container {
-                padding: 28px;
+                padding: 28px 24px;
                 border-radius: 24px;
             }
 
@@ -373,66 +564,98 @@
                 font-size: 2rem;
             }
 
+            .header p {
+                font-size: 1rem;
+            }
+
             .platform-icons {
                 gap: 10px;
             }
 
             .platform-icon {
-                width: 40px;
-                height: 40px;
-                font-size: 1.2rem;
+                width: 44px;
+                height: 44px;
+                font-size: 1.3rem;
             }
 
             .input-field {
-                padding: 16px 20px;
+                padding: 18px 22px;
                 font-size: 1rem;
             }
 
             .btn {
-                padding: 16px;
-                font-size: 1rem;
+                padding: 18px;
+                font-size: 1.1rem;
             }
 
             .video-title {
-                font-size: 1.2rem;
+                font-size: 1.3rem;
             }
 
             .video-info {
-                padding: 20px;
+                padding: 22px;
+            }
+
+            .channel-avatar {
+                width: 48px;
+                height: 48px;
             }
         }
     </style>
 </head>
 
 <body>
+    <!-- Loading Overlay -->
+    <div class="loader-overlay" id="loaderOverlay">
+        <div class="loader">
+            <div class="circle">
+                <div class="dot"></div>
+                <div class="outline"></div>
+            </div>
+            <div class="circle">
+                <div class="dot"></div>
+                <div class="outline"></div>
+            </div>
+            <div class="circle">
+                <div class="dot"></div>
+                <div class="outline"></div>
+            </div>
+            <div class="circle">
+                <div class="dot"></div>
+                <div class="outline"></div>
+            </div>
+        </div>
+        <div class="loader-text">Fetching media info...</div>
+    </div>
+
     <div class="container">
         <div class="header">
             <h1>Multi Downloader</h1>
-            <p>Download from YouTube, TikTok, Facebook & Instagram</p>
+            <p>Download from YouTube, TikTok, Facebook, Instagram & Spotify</p>
         </div>
 
         <!-- Platform Icons -->
         <div class="platform-icons">
             <div class="platform-icon youtube" data-name="YouTube">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="#FF0000">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="#FF0000">
                     <path
                         d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
                 </svg>
             </div>
             <div class="platform-icon tiktok" data-name="TikTok">
-                <svg width="20" height="22" viewBox="0 0 448 512" fill="white">
+                <svg width="22" height="24" viewBox="0 0 448 512" fill="white">
                     <path
                         d="M448,209.91a210.06,210.06,0,0,1-122.77-39.25V349.38A162.55,162.55,0,1,1,185,188.31V278.2a74.62,74.62,0,1,0,52.23,71.18V0l88,0a121.18,121.18,0,0,0,1.86,22.17h0A122.18,122.18,0,0,0,381,102.39a121.43,121.43,0,0,0,67,20.14Z" />
                 </svg>
             </div>
             <div class="platform-icon facebook" data-name="Facebook">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="#1877F2">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="#1877F2">
                     <path
                         d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
                 </svg>
             </div>
             <div class="platform-icon instagram" data-name="Instagram">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="url(#instagram-gradient)">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="url(#instagram-gradient)">
                     <defs>
                         <linearGradient id="instagram-gradient" x1="0%" y1="100%" x2="100%" y2="0%">
                             <stop offset="0%" style="stop-color:#FFDC80" />
@@ -445,22 +668,21 @@
                 </svg>
             </div>
             <div class="platform-icon spotify" data-name="Spotify">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="#1DB954">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="#1DB954">
                     <path
                         d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.26.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.72 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z" />
                 </svg>
             </div>
-
         </div>
 
-        <form method="POST">
+        <form method="POST" id="fetchForm">
             <div class="form-group">
                 <input type="text" name="url" id="urlInput" class="input-field"
                     placeholder="Paste any video or Spotify URL here..." value="{{ url if url else '' }}" required>
             </div>
 
-            <button type="submit" class="btn btn-primary">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+            <button type="submit" class="btn btn-primary" id="submitBtn">
+                <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none"
                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="11" cy="11" r="8"></circle>
                     <path d="m21 21-4.3-4.3"></path>
@@ -478,9 +700,10 @@
         {% if video_info %}
         <div class="video-card">
             <div class="thumbnail-container">
-                <img src="{{ video_info.thumbnail }}" alt="Thumbnail" onerror="this.style.display='none'">
-                {% if video_info.duration_string %}
-                <span class="duration-badge">{{ video_info.duration_string }}</span>
+                <img src="{{ video_info.thumbnail }}" alt="Thumbnail" loading="eager"
+                    onerror="this.style.display='none'">
+                {% if video_info.duration_string or video_info.duration %}
+                <span class="duration-badge">{{ video_info.duration_string or video_info.duration }}</span>
                 {% endif %}
             </div>
             <div class="video-info">
@@ -513,7 +736,6 @@
                     </div>
                 </div>
 
-
                 <!-- Download Buttons -->
                 {% if video_info.is_spotify %}
                 <a href="{{ video_info.spotify_url or url }}" target="_blank" class="btn btn-download"
@@ -543,7 +765,14 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', function () {
-            // Reserved for future frontend enhancements.
+            const form = document.getElementById('fetchForm');
+            const loader = document.getElementById('loaderOverlay');
+            const submitBtn = document.getElementById('submitBtn');
+
+            form.addEventListener('submit', function () {
+                loader.classList.add('active');
+                submitBtn.disabled = true;
+            });
         });
     </script>
 </body>
