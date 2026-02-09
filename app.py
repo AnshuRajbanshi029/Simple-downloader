@@ -269,32 +269,45 @@ def _format_duration(ms):
     return f"{minutes}:{seconds:02d}"
 
 
-def _is_direct_muxed_video(fmt):
-    """True when the format is directly streamable and already has video + audio."""
+def _is_direct_video_format(fmt):
+    """True when the format has a direct URL and contains video."""
     return (
         bool(fmt.get('url'))
         and fmt.get('vcodec') != 'none'
-        and fmt.get('acodec') != 'none'
+        and fmt.get('height')
     )
 
 
 def _select_direct_video_format(formats, quality='best'):
-    """Select best/worst direct video+audio format for streaming."""
-    candidates = [f for f in formats if _is_direct_muxed_video(f)]
+    """Select best/worst direct video format for streaming."""
+    candidates = [f for f in formats if _is_direct_video_format(f)]
     if not candidates:
         return None
 
-    # Prefer formats with known height, then bitrate and fps for tie-breaking.
-    def score(fmt):
-        return (
+    # Prioritize resolution first; prefer tracks with audio when quality is tied.
+    def has_audio(fmt):
+        return 1 if fmt.get('acodec') and fmt.get('acodec') != 'none' else 0
+
+    if quality == 'worst':
+        return min(
+            candidates,
+            key=lambda fmt: (
+                fmt.get('height') or 0,
+                fmt.get('tbr') or 0,
+                fmt.get('fps') or 0,
+                0 if has_audio(fmt) else 1,
+            ),
+        )
+
+    return max(
+        candidates,
+        key=lambda fmt: (
             fmt.get('height') or 0,
             fmt.get('tbr') or 0,
             fmt.get('fps') or 0,
-        )
-
-    if quality == 'worst':
-        return min(candidates, key=score)
-    return max(candidates, key=score)
+            has_audio(fmt),
+        ),
+    )
 
 
 def _video_mime_from_ext(ext):
