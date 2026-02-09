@@ -1,9 +1,6 @@
 import os
 import random
-import subprocess
-import tempfile
-import json
-from flask import Flask, render_template, request, redirect, url_for, send_file
+from flask import Flask, render_template, request, redirect, url_for
 
 import yt_dlp
 
@@ -23,14 +20,8 @@ PROXIES = [
     "sckfugob:2j5x61bsrvu0@23.229.19.94:8689",
 ]
 
-# Platform detection
+# Platform detection (video platforms only)
 PLATFORMS = {
-    'spotify': {
-        'domains': ['open.spotify.com', 'spotify.com'],
-        'name': 'Spotify',
-        'icon': '🎵',
-        'color': '#1DB954'
-    },
     'tiktok': {
         'domains': ['tiktok.com', 'vm.tiktok.com'],
         'name': 'TikTok',
@@ -66,12 +57,8 @@ def detect_platform(url):
                 return platform_id, config
     return 'youtube', PLATFORMS['youtube']  # Default to YouTube
 
-def get_random_proxy():
-    proxy = random.choice(PROXIES)
-    return f"http://{proxy}"
-
 def extract_video_info(video_url):
-    """Try all proxies until one succeeds (for yt-dlp supported platforms)."""
+    """Try all proxies until one succeeds."""
     shuffled_proxies = PROXIES.copy()
     random.shuffle(shuffled_proxies)
     
@@ -94,63 +81,6 @@ def extract_video_info(video_url):
     # All proxies failed
     raise last_error if last_error else Exception("All proxies failed")
 
-def get_spotify_info(spotify_url):
-    """Get Spotify track/playlist info using spotdl."""
-    try:
-        # Use spotdl to get metadata
-        result = subprocess.run(
-            ['spotdl', 'meta', spotify_url, '--output', '-'],
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
-        
-        if result.returncode != 0:
-            # Fallback: just return basic info from URL
-            return {
-                'title': 'Spotify Track',
-                'uploader': 'Spotify',
-                'thumbnail': 'https://storage.googleapis.com/pr-newsroom-wp/1/2018/11/Spotify_Logo_RGB_Green.png',
-                'duration_string': '--:--',
-                'platform': 'spotify',
-                'url': spotify_url,
-                'is_spotify': True
-            }
-        
-        # Parse the metadata if available
-        try:
-            metadata = json.loads(result.stdout)
-            if isinstance(metadata, list) and len(metadata) > 0:
-                track = metadata[0]
-                return {
-                    'title': track.get('name', 'Spotify Track'),
-                    'uploader': ', '.join(track.get('artists', ['Spotify'])),
-                    'thumbnail': track.get('cover_url', 'https://storage.googleapis.com/pr-newsroom-wp/1/2018/11/Spotify_Logo_RGB_Green.png'),
-                    'duration_string': f"{track.get('duration', 0) // 60}:{track.get('duration', 0) % 60:02d}",
-                    'platform': 'spotify',
-                    'url': spotify_url,
-                    'is_spotify': True
-                }
-        except json.JSONDecodeError:
-            pass
-        
-        return {
-            'title': 'Spotify Track',
-            'uploader': 'Spotify',
-            'thumbnail': 'https://storage.googleapis.com/pr-newsroom-wp/1/2018/11/Spotify_Logo_RGB_Green.png',
-            'duration_string': '--:--',
-            'platform': 'spotify',
-            'url': spotify_url,
-            'is_spotify': True
-        }
-        
-    except subprocess.TimeoutExpired:
-        raise Exception("Spotify request timed out")
-    except FileNotFoundError:
-        raise Exception("spotdl is not installed. Please run: pip install spotdl")
-    except Exception as e:
-        raise Exception(f"Spotify error: {str(e)}")
-
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
@@ -160,15 +90,8 @@ def index():
         
         try:
             platform_id, platform_config = detect_platform(video_url)
-            
-            if platform_id == 'spotify':
-                # Use spotdl for Spotify
-                info = get_spotify_info(video_url)
-            else:
-                # Use yt-dlp for everything else
-                info = extract_video_info(video_url)
-                info['platform'] = platform_id
-                info['is_spotify'] = False
+            info = extract_video_info(video_url)
+            info['platform'] = platform_id
             
             return render_template('index.html', 
                                    video_info=info, 
@@ -184,35 +107,13 @@ def index():
 @app.route('/download')
 def download():
     video_url = request.args.get('url')
-    is_spotify = request.args.get('spotify', 'false') == 'true'
     
     if not video_url:
         return redirect(url_for('index'))
 
     try:
-        if is_spotify:
-            # Download Spotify track using spotdl
-            with tempfile.TemporaryDirectory() as tmpdir:
-                result = subprocess.run(
-                    ['spotdl', video_url, '--output', tmpdir],
-                    capture_output=True,
-                    text=True,
-                    timeout=300
-                )
-                
-                # Find the downloaded file
-                files = os.listdir(tmpdir)
-                if files:
-                    filepath = os.path.join(tmpdir, files[0])
-                    return send_file(filepath, as_attachment=True, download_name=files[0])
-                else:
-                    return "Download failed: No file was created", 500
-        else:
-            # Use yt-dlp for video platforms
-            info = extract_video_info(video_url)
-            return redirect(info['url'])
-    except subprocess.TimeoutExpired:
-        return "Download timed out", 500
+        info = extract_video_info(video_url)
+        return redirect(info['url'])
     except Exception as e:
         return f"Error: {e}", 500
 
