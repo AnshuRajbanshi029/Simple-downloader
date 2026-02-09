@@ -2,3 +2,5 @@ flask
 requests
 yt-dlp
 gunicorn
+beautifulsoup4
+
