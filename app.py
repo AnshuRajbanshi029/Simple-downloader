@@ -68,6 +68,47 @@ def detect_platform(url):
                 return platform_id, config
     return 'youtube', PLATFORMS['youtube']  # Default to YouTube
 
+def get_youtube_channel_avatar(channel_id):
+    """Fetch YouTube channel avatar from channel page."""
+    if not channel_id:
+        return None
+    
+    try:
+        # Fetch channel page
+        channel_url = f"https://www.youtube.com/channel/{channel_id}"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+        response = requests.get(channel_url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            html = response.text
+            # Look for avatar URL in various patterns
+            import re
+            
+            # Pattern 1: og:image meta tag (often the channel avatar)
+            og_match = re.search(r'<meta property="og:image" content="([^"]+)"', html)
+            if og_match:
+                avatar_url = og_match.group(1)
+                # Convert to higher resolution
+                avatar_url = re.sub(r'=s\d+-', '=s176-', avatar_url)
+                return avatar_url
+            
+            # Pattern 2: Look for avatar in JSON data
+            avatar_match = re.search(r'"avatar":\s*\{\s*"thumbnails":\s*\[\s*\{\s*"url":\s*"([^"]+)"', html)
+            if avatar_match:
+                return avatar_match.group(1)
+            
+            # Pattern 3: Channel thumbnail URL pattern
+            thumb_match = re.search(r'(https://yt3\.ggpht\.com/[^"\\]+)', html)
+            if thumb_match:
+                return thumb_match.group(1)
+    except Exception as e:
+        print(f"Error fetching channel avatar: {e}")
+    
+    return None
+
+
 def extract_video_info(video_url):
     """Try all proxies until one succeeds."""
     shuffled_proxies = PROXIES.copy()
@@ -84,6 +125,14 @@ def extract_video_info(video_url):
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(video_url, download=False)
+                
+                # Try to get channel avatar for YouTube videos
+                channel_id = info.get('channel_id')
+                if channel_id and not info.get('artist_image'):
+                    avatar = get_youtube_channel_avatar(channel_id)
+                    if avatar:
+                        info['artist_image'] = avatar
+                
                 return info  # Success!
         except Exception as e:
             last_error = e
