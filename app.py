@@ -3,7 +3,7 @@ import random
 import time
 import base64
 import re
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, Response, stream_with_context
 
 import requests
 from bs4 import BeautifulSoup
@@ -461,7 +461,7 @@ def index():
 @app.route('/download')
 def download():
     video_url = request.args.get('url')
-    quality = request.args.get('quality', 'best')  # 'best' or 'worst'
+    quality = request.args.get('quality', 'best')
     
     if not video_url:
         return redirect(url_for('index'))
@@ -470,7 +470,6 @@ def download():
         shuffled_proxies = PROXIES.copy()
         random.shuffle(shuffled_proxies)
         
-        # Set format based on quality
         if quality == 'worst':
             format_str = 'worst[ext=mp4]/worst'
         else:
@@ -486,7 +485,26 @@ def download():
                 }
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(video_url, download=False)
-                    return redirect(info['url'])
+                    stream_url = info['url']
+                    title = info.get('title', 'video')
+                    
+                    # Stream the file with proper headers
+                    def generate():
+                        with requests.get(stream_url, stream=True, timeout=30) as r:
+                            r.raise_for_status()
+                            for chunk in r.iter_content(chunk_size=8192):
+                                if chunk:
+                                    yield chunk
+                    
+                    safe_filename = re.sub(r'[^\w\-_.]', '_', title)[:100] + '.mp4'
+                    
+                    return Response(
+                        stream_with_context(generate()),
+                        headers={
+                            'Content-Disposition': f'attachment; filename="{safe_filename}"',
+                            'Content-Type': 'video/mp4',
+                        }
+                    )
             except Exception:
                 continue
         
@@ -498,7 +516,7 @@ def download():
 @app.route('/download_audio')
 def download_audio():
     video_url = request.args.get('url')
-    audio_format = request.args.get('format', 'mp3')  # 'mp3' or 'wav'
+    audio_format = request.args.get('format', 'mp3')
     
     if not video_url:
         return redirect(url_for('index'))
@@ -517,7 +535,27 @@ def download_audio():
                 }
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(video_url, download=False)
-                    return redirect(info['url'])
+                    stream_url = info['url']
+                    title = info.get('title', 'audio')
+                    ext = audio_format.lower()
+                    
+                    def generate():
+                        with requests.get(stream_url, stream=True, timeout=30) as r:
+                            r.raise_for_status()
+                            for chunk in r.iter_content(chunk_size=8192):
+                                if chunk:
+                                    yield chunk
+                    
+                    safe_filename = re.sub(r'[^\w\-_.]', '_', title)[:100] + f'.{ext}'
+                    mime_type = 'audio/mpeg' if ext == 'mp3' else 'audio/wav'
+                    
+                    return Response(
+                        stream_with_context(generate()),
+                        headers={
+                            'Content-Disposition': f'attachment; filename="{safe_filename}"',
+                            'Content-Type': mime_type,
+                        }
+                    )
             except Exception:
                 continue
         

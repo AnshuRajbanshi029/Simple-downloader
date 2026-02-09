@@ -799,13 +799,11 @@
                     <div class="download-section">
                         <div class="download-section-title">📹 Video Download</div>
                         <div class="download-btn-group">
-                            <a href="{{ url_for('download', url=url, quality='best') }}" target="_blank"
-                                class="btn-small btn-video">
+                            <a href="{{ url_for('download', url=url, quality='best') }}" class="btn-small btn-video">
                                 Highest Quality
                                 <span class="quality-label" id="bestQuality">HD</span>
                             </a>
-                            <a href="{{ url_for('download', url=url, quality='worst') }}" target="_blank"
-                                class="btn-small btn-video">
+                            <a href="{{ url_for('download', url=url, quality='worst') }}" class="btn-small btn-video">
                                 Lowest Quality
                                 <span class="quality-label" id="worstQuality">SD</span>
                             </a>
@@ -814,13 +812,11 @@
                     <div class="download-section">
                         <div class="download-section-title">🎵 Audio Download</div>
                         <div class="download-btn-group">
-                            <a href="{{ url_for('download_audio', url=url, format='mp3') }}" target="_blank"
-                                class="btn-small btn-audio">
+                            <a href="{{ url_for('download_audio', url=url, format='mp3') }}" class="btn-small btn-audio">
                                 MP3 Format
                                 <span class="quality-label">.mp3</span>
                             </a>
-                            <a href="{{ url_for('download_audio', url=url, format='wav') }}" target="_blank"
-                                class="btn-small btn-audio">
+                            <a href="{{ url_for('download_audio', url=url, format='wav') }}" class="btn-small btn-audio">
                                 WAV Format
                                 <span class="quality-label">.wav</span>
                             </a>
