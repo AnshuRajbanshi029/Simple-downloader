@@ -322,6 +322,13 @@
             color: #1a1a2e;
             flex-shrink: 0;
         }
+        .channel-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 50%;
+            display: block;
+        }
 
         .channel-details {
             flex: 1;
@@ -451,11 +458,6 @@
                     placeholder="Paste any video or Spotify URL here..." value="{{ url if url else '' }}" required>
             </div>
 
-            <div class="form-group" id="spotifyTokenGroup" style="display: none;">
-                <input type="text" name="spotify_token" id="spotifyTokenInput" class="input-field"
-                    placeholder="Spotify Auth Token (Required for Spotify links)"
-                    style="font-size: 0.9rem; border-color: #1DB954;">
-            </div>
             <button type="submit" class="btn btn-primary">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -492,7 +494,12 @@
 
                 <div class="channel-info">
                     <div class="channel-avatar">
+                        {% if video_info.artist_image %}
+                        <img src="{{ video_info.artist_image }}" alt="Artist image"
+                            onerror="this.style.display='none'; this.parentElement.textContent='{{ video_info.uploader[:1].upper() if video_info.uploader else '?' }}';">
+                        {% else %}
                         {{ video_info.uploader[:1].upper() if video_info.uploader else '?' }}
+                        {% endif %}
                     </div>
                     <div class="channel-details">
                         <div class="channel-name">{{ video_info.uploader or 'Unknown' }}</div>
@@ -505,18 +512,17 @@
 
                 <!-- Download Buttons -->
                 {% if video_info.is_spotify %}
-                <!-- Spotify Download Direct Link -->
-                <a href="{{ video_info.download_link }}" target="_blank" class="btn btn-download"
+                <a href="{{ video_info.spotify_url or url }}" target="_blank" class="btn btn-download"
                     style="background: linear-gradient(135deg, #1DB954, #1ed760); color: white;">
                     <svg class="download-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                         <polyline points="7 10 12 15 17 10"></polyline>
                         <line x1="12" y1="15" x2="12" y2="3"></line>
                     </svg>
-                    Download MP3
+                    Open in Spotify
                 </a>
                 <div class="spotify-note">
-                    🎵 Link provided by Spotidownloader API
+                    Spotify metadata fetched via official API.
                 </div>
                 {% else %}
                 <!-- Video Download -->
@@ -537,45 +543,7 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', function () {
-            const urlInput = document.getElementById('urlInput');
-            const tokenGroup = document.getElementById('spotifyTokenGroup');
-            const tokenInput = document.getElementById('spotifyTokenInput');
-
-            // Load saved token
-            const savedToken = localStorage.getItem('spotify_token');
-            if (savedToken && tokenInput) {
-                tokenInput.value = savedToken;
-            }
-
-            // Show/Hide token input based on URL
-            function checkUrl() {
-                if (!urlInput || !tokenGroup) return;
-
-                const url = urlInput.value.toLowerCase();
-                if (url.includes('spotify.com')) {
-                    tokenGroup.style.display = 'block';
-                    if (tokenInput && !tokenInput.value) {
-                        // Optional: Flash input?
-                    }
-                } else {
-                    tokenGroup.style.display = 'none';
-                }
-            }
-
-            if (urlInput) {
-                urlInput.addEventListener('input', checkUrl);
-                checkUrl(); // Run on load
-            }
-
-            // Save token on submit
-            const form = document.querySelector('form');
-            if (form) {
-                form.addEventListener('submit', function () {
-                    if (tokenInput && tokenInput.value) {
-                        localStorage.setItem('spotify_token', tokenInput.value);
-                    }
-                });
-            }
+            // Reserved for future frontend enhancements.
         });
     </script>
 </body>
