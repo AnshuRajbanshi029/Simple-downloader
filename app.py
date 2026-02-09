@@ -488,9 +488,11 @@ def download():
                     stream_url = info['url']
                     title = info.get('title', 'video')
                     
-                    # Stream the file with proper headers
+                    # Stream the file with proper headers (through same proxy)
+                    proxy_url = f"http://{proxy}"
+                    
                     def generate():
-                        with requests.get(stream_url, stream=True, timeout=30) as r:
+                        with requests.get(stream_url, stream=True, timeout=30, proxies={'http': proxy_url, 'https': proxy_url}) as r:
                             r.raise_for_status()
                             for chunk in r.iter_content(chunk_size=8192):
                                 if chunk:
@@ -539,8 +541,11 @@ def download_audio():
                     title = info.get('title', 'audio')
                     ext = audio_format.lower()
                     
+                    # Stream the file with proper headers (through same proxy)
+                    proxy_url = f"http://{proxy}"
+                    
                     def generate():
-                        with requests.get(stream_url, stream=True, timeout=30) as r:
+                        with requests.get(stream_url, stream=True, timeout=30, proxies={'http': proxy_url, 'https': proxy_url}) as r:
                             r.raise_for_status()
                             for chunk in r.iter_content(chunk_size=8192):
                                 if chunk:
