@@ -2,6 +2,7 @@ import os
 import random
 from flask import Flask, render_template, request, redirect, url_for
 
+import requests
 import yt_dlp
 
 app = Flask(__name__)
@@ -45,6 +46,12 @@ PLATFORMS = {
         'name': 'YouTube',
         'icon': '▶️',
         'color': '#FF0000'
+    },
+    'spotify': {
+        'domains': ['spotify.com', 'open.spotify.com'],
+        'name': 'Spotify',
+        'icon': '🎵',
+        'color': '#1DB954'
     }
 }
 
@@ -81,6 +88,47 @@ def extract_video_info(video_url):
     # All proxies failed
     raise last_error if last_error else Exception("All proxies failed")
 
+def get_spotify_metadata(track_url, token):
+    try:
+        if "spotify.com/track/" not in track_url:
+            return None
+            
+        track_id = track_url.split("track/")[1].split("?")[0]
+        
+        url = "https://api.spotidownloader.com/metadata"
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json',
+            'Origin': 'https://spotidownloader.com',
+            'Referer': 'https://spotidownloader.com/'
+        }
+        payload = {'type': 'track', 'id': track_id}
+        
+        response = requests.post(url, headers=headers, json=payload)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('success'):
+                meta = data['metadata']
+                return {
+                    'title': meta['title'],
+                    'uploader': meta['artists'],
+                    'thumbnail': meta['cover'],
+                    'is_spotify': True,
+                    'download_link': data['link'],
+                    'platform': 'spotify'
+                }
+            else:
+                raise Exception(f"API Error: {data.get('message', 'Unknown error')}")
+        elif response.status_code == 403: # Token expired or invalid
+             raise Exception("Token Invalid or Expired (403)")
+        elif response.status_code == 400:
+             raise Exception("Bad Request (400) - Verify Token")
+             
+    except Exception as e:
+        raise Exception(f"Spotify Error: {str(e)}")
+    return None
+
+
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
@@ -90,7 +138,15 @@ def index():
         
         try:
             platform_id, platform_config = detect_platform(video_url)
-            info = extract_video_info(video_url)
+            
+            if platform_id == 'spotify':
+                token = request.form.get('spotify_token')
+                if not token:
+                    raise Exception("Spotify Token is required! Please paste it in the input field.")
+                info = get_spotify_metadata(video_url, token)
+            else:
+                info = extract_video_info(video_url)
+                
             info['platform'] = platform_id
             
             return render_template('index.html', 
