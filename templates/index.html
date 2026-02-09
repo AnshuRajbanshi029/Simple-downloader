@@ -1,73 +1,330 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple Video Downloader</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>Video Downloader</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            /* Soft Digital Pastels */
+            --lavender: #E6E0F8;
+            --lavender-light: #F0ECF9;
+            --powder-blue: #B8D4E8;
+            --powder-blue-dark: #8FBDD8;
+            --soft-peach: #FFD8CC;
+            --peach-dark: #FFBDA8;
+            --bg-gradient-start: #1a1a2e;
+            --bg-gradient-mid: #16213e;
+            --bg-gradient-end: #0f0f23;
+            --text-primary: #ffffff;
+            --text-secondary: #c4c4d4;
+        }
+
         body {
-            background-color: #0f0f0f;
-            color: #ffffff;
             font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, var(--bg-gradient-start), var(--bg-gradient-mid), var(--bg-gradient-end));
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 20px;
+            color: var(--text-primary);
         }
-        .glass-panel {
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+            padding: 48px;
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(20px);
+            border-radius: 32px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 25px 80px rgba(0, 0, 0, 0.4);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            font-size: 3rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--lavender), var(--powder-blue), var(--soft-peach));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 12px;
+        }
+
+        .header p {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+        }
+
+        .form-group {
+            margin-bottom: 24px;
+        }
+
+        .input-field {
+            width: 100%;
+            padding: 20px 28px;
+            font-size: 1.1rem;
             background: rgba(255, 255, 255, 0.05);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            color: var(--text-primary);
+            transition: all 0.3s ease;
         }
-        .input-glow:focus {
-            box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
-            border-color: #3b82f6;
+
+        .input-field::placeholder {
+            color: rgba(255, 255, 255, 0.4);
+        }
+
+        .input-field:focus {
+            outline: none;
+            border-color: var(--lavender);
+            box-shadow: 0 0 20px rgba(230, 224, 248, 0.2);
+        }
+
+        .btn {
+            width: 100%;
+            padding: 20px;
+            font-size: 1.2rem;
+            font-weight: 600;
+            border: none;
+            border-radius: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--powder-blue), var(--lavender));
+            color: #1a1a2e;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 12px 30px rgba(184, 212, 232, 0.3);
+        }
+
+        .btn-download {
+            background: linear-gradient(135deg, var(--soft-peach), var(--peach-dark));
+            color: #1a1a2e;
+        }
+
+        .btn-download:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 12px 30px rgba(255, 216, 204, 0.3);
+        }
+
+        .error-box {
+            margin-top: 24px;
+            padding: 20px;
+            background: rgba(255, 100, 100, 0.1);
+            border: 1px solid rgba(255, 100, 100, 0.3);
+            border-radius: 16px;
+            color: #ffb3b3;
+            text-align: center;
+        }
+
+        .video-card {
+            margin-top: 40px;
+            background: rgba(255, 255, 255, 0.04);
+            border-radius: 24px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .thumbnail-container {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16/9;
+            overflow: hidden;
+        }
+
+        .thumbnail-container img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .duration-badge {
+            position: absolute;
+            bottom: 12px;
+            right: 12px;
+            background: rgba(0, 0, 0, 0.85);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 600;
+        }
+
+        .video-info {
+            padding: 28px;
+        }
+
+        .video-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 16px;
+            line-height: 1.4;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .channel-info {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 24px;
+            padding: 16px;
+            background: rgba(255, 255, 255, 0.04);
+            border-radius: 12px;
+        }
+
+        .channel-avatar {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--lavender), var(--powder-blue));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #1a1a2e;
+            flex-shrink: 0;
+        }
+
+        .channel-details {
+            flex: 1;
+        }
+
+        .channel-name {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .video-meta {
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        .download-icon {
+            width: 24px;
+            height: 24px;
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                padding: 28px;
+                border-radius: 24px;
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .input-field {
+                padding: 16px 20px;
+                font-size: 1rem;
+            }
+
+            .btn {
+                padding: 16px;
+                font-size: 1rem;
+            }
+
+            .video-title {
+                font-size: 1.2rem;
+            }
+
+            .video-info {
+                padding: 20px;
+            }
         }
     </style>
 </head>
-<body class="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black">
 
-    <div class="w-full max-w-lg p-8 rounded-2xl glass-panel shadow-2xl">
-        <h1 class="text-3xl font-bold text-center mb-2 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">
-            Video Downloader
-        </h1>
-        <p class="text-gray-400 text-center mb-8 text-sm">Paste a YouTube link below to start</p>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Video Downloader</h1>
+            <p>Paste a YouTube link below to get started</p>
+        </div>
 
-        <form method="POST" class="space-y-4">
-            <div class="relative">
-                <input type="text" name="url" placeholder="Paste YouTube URL here..." required
-                    class="w-full px-5 py-4 bg-gray-900/50 border border-gray-700 rounded-xl focus:outline-none input-glow transition-all text-white placeholder-gray-500"
-                    value="{{ url if url else '' }}">
+        <form method="POST">
+            <div class="form-group">
+                <input type="text" name="url" class="input-field" placeholder="https://www.youtube.com/watch?v=..."
+                    value="{{ url if url else '' }}" required>
             </div>
-            
-            <button type="submit" 
-                class="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl transition-all shadow-lg hover:shadow-blue-500/30 transform hover:-translate-y-0.5">
+            <button type="submit" class="btn btn-primary">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <path d="m21 21-4.3-4.3"></path>
+                </svg>
                 Get Video Info
             </button>
         </form>
 
         {% if error %}
-        <div class="mt-6 p-4 bg-red-500/10 border border-red-500/50 rounded-xl text-red-200 text-center text-sm">
+        <div class="error-box">
             {{ error }}
         </div>
         {% endif %}
 
         {% if video_info %}
-        <div class="mt-8 animate-fade-in text-center">
-            <div class="mb-4 relative group">
-                <img src="{{ video_info.thumbnail }}" alt="Thumbnail" class="w-full h-48 object-cover rounded-xl shadow-lg border border-gray-700">
-                <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-xl">
-                    <span class="text-white font-medium">Ready</span>
-                </div>
+        <div class="video-card">
+            <div class="thumbnail-container">
+                <img src="{{ video_info.thumbnail }}" alt="Video Thumbnail">
+                <span class="duration-badge">{{ video_info.duration_string }}</span>
             </div>
-            <h2 class="text-xl font-semibold mb-1 truncate">{{ video_info.title }}</h2>
-            <p class="text-gray-400 text-xs mb-6">{{ video_info.uploader }} • {{ video_info.duration_string }}</p>
-            
-            <a href="{{ url_for('download', url=url) }}" target="_blank"
-                class="inline-flex items-center justify-center w-full py-4 bg-green-600 hover:bg-green-500 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-green-500/30 transform hover:-translate-y-0.5">
-                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                Download Video
-            </a>
+            <div class="video-info">
+                <h2 class="video-title">{{ video_info.title }}</h2>
+
+                <div class="channel-info">
+                    <div class="channel-avatar">
+                        {{ video_info.uploader[:1].upper() if video_info.uploader else 'Y' }}
+                    </div>
+                    <div class="channel-details">
+                        <div class="channel-name">{{ video_info.uploader }}</div>
+                        <div class="video-meta">{{ video_info.view_count | default(0) | int | filesizeformat }} views
+                        </div>
+                    </div>
+                </div>
+
+                <a href="{{ url_for('download', url=url) }}" target="_blank" class="btn btn-download">
+                    <svg class="download-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    Download Video
+                </a>
+            </div>
         </div>
         {% endif %}
     </div>
-
 </body>
+
 </html>
