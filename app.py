@@ -162,45 +162,103 @@ def spotify_api_get(path):
 
 def _fetch_html(url):
     headers = {
-        "User-Agent": "Mozilla/5.0",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.google.com/"
     }
-    response = requests.get(url, headers=headers, timeout=15)
-    if response.status_code != 200:
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code != 200:
+            return None
+        return response.text
+    except:
         return None
-    return response.text
 
+
+from bs4 import BeautifulSoup
 
 def _extract_meta_content(html, property_name):
     if not html:
         return None
-    pattern = rf'<meta[^>]+property="{re.escape(property_name)}"[^>]+content="([^"]+)"'
-    match = re.search(pattern, html, flags=re.IGNORECASE)
-    return match.group(1) if match else None
+    soup = BeautifulSoup(html, 'html.parser')
+    
+    # Try property attribute (Standard OG tags)
+    meta = soup.find('meta', property=property_name)
+    if meta and meta.get('content'):
+        return meta['content']
+        
+    # Try name attribute (Twitter tags, etc.)
+    meta = soup.find('meta', attrs={'name': property_name})
+    if meta and meta.get('content'):
+        return meta['content']
+        
+    # Try itemprop (Schema.org)
+    meta = soup.find('meta', itemprop=property_name)
+    if meta and meta.get('content'):
+        return meta['content']
+        
+    # Try link tags (music:musician is often a link)
+    link = soup.find('link', rel=property_name)
+    if link and link.get('href'):
+        return link['href']
+        
+    return None
 
 
 def get_spotify_metadata_public(track_url):
-    """No-credential fallback using Spotify public pages/oEmbed."""
+    """No-credential fallback using Spotify public pages/oEmbed/YouTube Search."""
     oembed_res = requests.get(
         "https://open.spotify.com/oembed",
         params={"url": track_url},
         timeout=15
     )
-    if oembed_res.status_code != 200:
-        raise Exception(f"Spotify public metadata fetch failed ({oembed_res.status_code})")
-
-    oembed = oembed_res.json()
+    
+    oembed = oembed_res.json() if oembed_res.status_code == 200 else {}
     title = oembed.get("title") or "Unknown"
     artist_names = oembed.get("author_name") or "Unknown"
     cover = oembed.get("thumbnail_url")
 
-    # Track page usually contains a music:musician link to an artist page.
-    artist_image = None
+    # Scrape track page for more precise info
     track_html = _fetch_html(track_url)
-    artist_url = _extract_meta_content(track_html, "music:musician")
-    if artist_url:
-        artist_html = _fetch_html(artist_url)
-        artist_image = _extract_meta_content(artist_html, "og:image")
+    if track_html:
+        # Improved Title/Artist extraction from OG tags
+        og_title = _extract_meta_content(track_html, "og:title")
+        if og_title and " - Song by " in og_title:
+             artist_names = og_title.split(" - Song by ")[1]
+             if not title or title == "Unknown":
+                 title = og_title.split(" - Song by ")[0]
+        
+        og_desc = _extract_meta_content(track_html, "og:description")
+        if og_desc and " · " in og_desc:
+            parts = og_desc.split(" · ")
+            if len(parts) >= 2:
+                 artist_names = parts[1]
+
+    # YouTube Fallback for Artist Name/Image if Spotify fails
+    artist_image = None
+    if artist_names == "Unknown" or not artist_names:
+        try:
+            # Search YouTube for the track title
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': True,
+                'max_downloads': 1,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                search_results = ydl.extract_info(f"ytsearch1:{title} song", download=False)
+                if search_results.get('entries'):
+                    entry = search_results['entries'][0]
+                    artist_names = entry.get('uploader') or artist_names
+                    # Try to get channel thumbnail? yt-dlp might not have it in flat search
+                    # But uploader is better than "Unknown"
+        except:
+            pass
+
+    # Profile Image Fallback (use album cover if artist image missing)
+    if not artist_image:
+        artist_image = cover
 
     return {
         "title": title,
