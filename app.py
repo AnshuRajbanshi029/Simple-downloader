@@ -353,6 +353,22 @@ def _select_direct_video_format(formats, quality='best'):
     )
 
 
+def _get_quality_labels(formats):
+    """Return best/worst quality labels like 2160p and 144p."""
+    video_fmts = [
+        f for f in formats
+        if f.get('vcodec') != 'none' and f.get('height')
+    ]
+    if not video_fmts:
+        return 'HD', 'SD'
+
+    best_height = max(f.get('height', 0) for f in video_fmts)
+    worst_height = min(f.get('height', 0) for f in video_fmts)
+    best_label = f"{best_height}p" if best_height else 'Best'
+    worst_label = f"{worst_height}p" if worst_height else 'Low'
+    return best_label, worst_label
+
+
 def _video_mime_from_ext(ext):
     ext = (ext or '').lower()
     if ext == 'webm':
@@ -543,6 +559,21 @@ def index():
                 info = extract_video_info(video_url)
                 
             info['platform'] = platform_id
+
+            if platform_id == 'tiktok' and not info.get('artist_image'):
+                avatar = (
+                    info.get('uploader_avatar')
+                    or info.get('uploader_avatar_url')
+                    or info.get('uploader_thumbnail')
+                    or info.get('avatar')
+                )
+                if avatar:
+                    info['artist_image'] = avatar
+
+            if platform_id != 'spotify':
+                best_label, worst_label = _get_quality_labels(info.get('formats', []))
+                info['best_quality_label'] = best_label
+                info['worst_quality_label'] = worst_label
             
             return render_template('index.html', 
                                    video_info=info, 
