@@ -294,85 +294,93 @@ def get_instagram_user_avatar(user_id):
     return None
 
 
-def get_facebook_profile_avatar(profile_url):
-    if not profile_url:
+def _is_fb_default_avatar(url):
+    """Return True if ``url`` looks like Facebook's generic default avatar.
+
+    Default/placeholder profile pictures live under the ``t1.30497-1`` CDN
+    bucket.  Real user photos use buckets like ``t39.30808-1``, etc.
+    """
+    return '/t1.30497-1/' in (url or '')
+
+
+def get_facebook_profile_avatar(video_page_url):
+    """Extract the *poster's* profile picture from a Facebook video/post page.
+
+    Strategy order
+    ──────────────
+    1. Find ALL ``profile_picture.uri`` entries in the page's embedded JSON and
+       return the first one that is NOT a default/silhouette avatar.
+    2. Find ``profilePicLarge`` / ``profilePicMedium`` / ``profilePic`` keys.
+    3. Look for ``profile_url`` in the JSON, fetch that profile page, and
+       repeat the search there.
+    4. Legacy meta-tag / og:image fallback.
+    """
+    if not video_page_url:
         return None
 
-    # Fetch the supplied URL first (could be a post/permalink)
-    html = _fetch_html_with_proxies(profile_url) or _fetch_html(profile_url)
+    html = _fetch_html_with_proxies(video_page_url) or _fetch_html(video_page_url)
     if not html:
         return None
 
-    # Sometimes Facebook embeds JSON blobs that already contain the
-    # author's profile_url and a profile_picture.uri — try those first.
-    m = re.search(r'"profile_picture"\s*:\s*\{[^\}]*"uri"\s*:\s*"([^"]+)"', html)
-    if m:
-        return _clean_image_url(m.group(1).replace('\\/','/'))
+    # ── 1. Collect ALL profile_picture.uri entries; skip default avatars ──
+    all_pics = re.findall(
+        r'"profile_picture"\s*:\s*\{[^\}]*"uri"\s*:\s*"([^"]+)"', html
+    )
+    for raw in all_pics:
+        pic = _clean_image_url(raw.replace('\\/', '/'))
+        if not _is_fb_default_avatar(pic):
+            return pic
 
-    m2 = re.search(r'"profile_url"\s*:\s*"(https?:\\/\\/www\.facebook\.com[^"]+)"', html)
-    if m2:
-        # unescape JSON-style slashes
-        candidate = m2.group(1).replace('\\/','/')
-        # prefer absolute profile link
-        profile_url = candidate
-        html = _fetch_html_with_proxies(profile_url) or _fetch_html(profile_url)
-        if not html:
-            return None
-
-    # If the provided URL looks like a post/permalink (photo, posts, photo.php)
-    # try to discover the author profile URL from the page HTML
-    if re.search(r'/photo[s]?/|/posts/|/permalink|/photo.php|/watch/|/videos?/', profile_url, re.I):
-        # 1) Look for explicit meta 'article:author'
-        author = None
-        m = re.search(r'<meta[^>]+property="article:author"[^>]+content="([^"]+)"', html)
+    # ── 2. Try profilePicLarge / profilePicMedium / profilePic ──
+    for key in ('profilePicLarge', 'profilePicMedium', 'profilePic'):
+        m = re.search(
+            rf'"{key}"\s*:\s*\{{[^\}}]*"uri"\s*:\s*"([^"]+)"', html
+        )
         if m:
-            author = m.group(1)
-        # 2) Look for rel="author" link
-        if not author:
-            m = re.search(r'<link[^>]+rel="author"[^>]+href="([^"]+)"', html)
-            if m:
-                author = m.group(1)
-        # 3) Fallback: scan hrefs for profile-like path (/username[.numbers]?)
-        if not author:
-            hrefs = re.findall(r'href="(/[^\"\?\#]+)"', html)
-            for h in hrefs:
-                # Skip known non-profile paths
-                if re.search(r'^/(?:photo|photos|watch|videos?|pages|groups|login|marketplace|events)\b', h, re.I):
-                    continue
-                # Profile-like (e.g., /username or /username.123)
-                if re.search(r'^/[A-Za-z0-9\.\-_]{3,}$', h):
-                    author = 'https://www.facebook.com' + h
-                    break
-        if author:
-            profile_url = author
-            html = _fetch_html_with_proxies(profile_url) or _fetch_html(profile_url)
-            if not html:
-                return None
+            pic = _clean_image_url(m.group(1).replace('\\/', '/'))
+            if not _is_fb_default_avatar(pic):
+                return pic
 
-    # Prefer link rel="image_src" which often points to profile picture
-    img_link = None
-    m = re.search(r'<link[^>]+rel="image_src"[^>]+href="([^"]+)"', html)
-    if m:
-        img_link = m.group(1)
+    # ── 3. Discover the author's profile URL from JSON and fetch that page ──
+    m2 = re.search(
+        r'"profile_url"\s*:\s*"(https?:\\/\\/www\.facebook\.com[^"]+)"', html
+    )
+    if m2:
+        author_url = m2.group(1).replace('\\/', '/')
+        profile_html = (
+            _fetch_html_with_proxies(author_url) or _fetch_html(author_url)
+        )
+        if profile_html:
+            pp = re.findall(
+                r'"profile_picture"\s*:\s*\{[^\}]*"uri"\s*:\s*"([^"]+)"',
+                profile_html,
+            )
+            for raw in pp:
+                pic = _clean_image_url(raw.replace('\\/', '/'))
+                if not _is_fb_default_avatar(pic):
+                    return pic
+            for key in ('profilePicLarge', 'profilePicMedium', 'profilePic'):
+                mp = re.search(
+                    rf'"{key}"\s*:\s*\{{[^\}}]*"uri"\s*:\s*"([^"]+)"',
+                    profile_html,
+                )
+                if mp:
+                    pic = _clean_image_url(mp.group(1).replace('\\/', '/'))
+                    if not _is_fb_default_avatar(pic):
+                        return pic
 
-    # Fallback to og:image
-    if not img_link:
-        og_image = _extract_meta_content(html, 'og:image')
-        if og_image:
-            img_link = og_image
-
-    # If we found an image link by rel or og, return it now
-    if img_link:
-        return _clean_image_url(img_link)
-
-    patterns = [
+    # ── 4. Legacy: meta tags on whatever page we last fetched ──
+    for pat in (
+        r'<link[^>]+rel="image_src"[^>]+href="([^"]+)"',
+        r'<meta[^>]+property="og:image"[^>]+content="([^"]+)"',
         r'"profilePicUrl"\s*:\s*"([^"]+)"',
         r'"profile_pic_url"\s*:\s*"([^"]+)"',
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, html)
-        if match:
-            return _clean_image_url(match.group(1))
+    ):
+        m = re.search(pat, html)
+        if m:
+            pic = _clean_image_url(m.group(1))
+            if not _is_fb_default_avatar(pic):
+                return pic
 
     return None
 
@@ -844,16 +852,24 @@ def index():
                         or info.get('avatar')
                     )
                     if not avatar:
-                        profile_url = info.get('uploader_url') or info.get('channel_url')
-                        if not profile_url:
-                            webpage_url = info.get('webpage_url')
-                            if webpage_url:
-                                match = re.search(r'facebook\.com/([^/?]+)', webpage_url)
-                                if match:
-                                    slug = match.group(1)
+                        # The actual video/post page contains rich embedded JSON
+                        # with the poster's profile_picture — prefer that over
+                        # the uploader's profile page (which Facebook blocks
+                        # for unauthenticated requests).
+                        video_page = info.get('webpage_url') or info.get('url')
+                        avatar = get_facebook_profile_avatar(video_page)
+                        # Fallback: try the uploader/channel profile URL
+                        if not avatar:
+                            profile_url = info.get('uploader_url') or info.get('channel_url')
+                            if not profile_url:
+                                wp = info.get('webpage_url', '')
+                                m_slug = re.search(r'facebook\.com/([^/?]+)', wp)
+                                if m_slug:
+                                    slug = m_slug.group(1)
                                     if slug not in {'watch', 'reel', 'videos', 'story.php'}:
                                         profile_url = f"https://www.facebook.com/{slug}"
-                        avatar = get_facebook_profile_avatar(profile_url)
+                            if profile_url:
+                                avatar = get_facebook_profile_avatar(profile_url)
 
                     if avatar:
                         info['artist_image'] = avatar
