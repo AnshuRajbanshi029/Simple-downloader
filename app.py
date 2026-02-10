@@ -63,16 +63,16 @@ def _cleanup_task(task_id):
 
 # Residential Proxies - rotates randomly for each request
 PROXIES = [
-    "sckfugob:2j5x61bsrvu0@31.59.20.176:6754",
-    "sckfugob:2j5x61bsrvu0@23.95.150.145:6114",
-    "sckfugob:2j5x61bsrvu0@198.23.239.134:6540",
-    "sckfugob:2j5x61bsrvu0@45.38.107.97:6014",
-    "sckfugob:2j5x61bsrvu0@107.172.163.27:6543",
-    "sckfugob:2j5x61bsrvu0@198.105.121.200:6462",
-    "sckfugob:2j5x61bsrvu0@64.137.96.74:6641",
-    "sckfugob:2j5x61bsrvu0@216.10.27.159:6837",
-    "sckfugob:2j5x61bsrvu0@23.26.71.145:5628",
-    "sckfugob:2j5x61bsrvu0@23.229.19.94:8689",
+    "ppdyrflk:jgnyfq1ajlik@31.59.20.176:6754",
+    "ppdyrflk:jgnyfq1ajlik@23.95.150.145:6114",
+    "ppdyrflk:jgnyfq1ajlik@198.23.239.134:6540",
+    "ppdyrflk:jgnyfq1ajlik@45.38.107.97:6014",
+    "ppdyrflk:jgnyfq1ajlik@107.172.163.27:6543",
+    "ppdyrflk:jgnyfq1ajlik@198.105.121.200:6462",
+    "ppdyrflk:jgnyfq1ajlik@64.137.96.74:6641",
+    "ppdyrflk:jgnyfq1ajlik@216.10.27.159:6837",
+    "ppdyrflk:jgnyfq1ajlik@23.26.71.145:5628",
+    "ppdyrflk:jgnyfq1ajlik@23.229.19.94:8689",
 ]
 
 # Platform detection (video platforms only)
