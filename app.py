@@ -20,7 +20,7 @@ app = Flask(__name__)
 
 # ── In-memory task tracker for download progress ──────────────────────────
 download_tasks = {}  # task_id -> task dict
-TASK_TTL = 600       # seconds to keep completed tasks before cleanup
+TASK_TTL = 3600      # seconds to keep completed tasks before cleanup
 
 
 def _make_task():
@@ -38,12 +38,19 @@ def _make_task():
         'filesize': 0,
         'error': None,
         'created_at': time.time(),
+        'last_activity': time.time(),
     }
     download_tasks[task_id] = task
-    # Prune old tasks
+    # Prune old tasks — never kill a still-running download
     now = time.time()
     for tid in list(download_tasks):
-        if now - download_tasks[tid]['created_at'] > TASK_TTL:
+        t = download_tasks.get(tid)
+        if not t:
+            continue
+        if t['status'] in ('starting', 'downloading', 'merging'):
+            continue
+        age = now - t.get('last_activity', t['created_at'])
+        if age > TASK_TTL:
             _cleanup_task(tid)
     return task
 
@@ -1044,24 +1051,44 @@ def _run_video_download(task, video_url, quality, proxies):
 
             output_template = os.path.join(tmpdir, '%(id)s.%(ext)s')
 
+            # Track multi-stream progress (video + audio are separate downloads)
+            _dl_state = {'streams_done': 0}
+
             def _progress_hook(d):
+                task['last_activity'] = time.time()
                 if d.get('status') == 'downloading':
                     task['status'] = 'downloading'
                     total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
                     downloaded = d.get('downloaded_bytes', 0)
                     if total > 0:
-                        task['progress'] = min(int(downloaded / total * 100), 100)
-                    task['message'] = 'Downloading video…'
+                        raw_pct = downloaded / total
+                        if _dl_state['streams_done'] == 0:
+                            # First stream (video): map to 0–85 %
+                            task['progress'] = min(int(raw_pct * 85), 85)
+                        else:
+                            # Second stream (audio): map to 85–95 %
+                            task['progress'] = min(85 + int(raw_pct * 10), 95)
+                    if _dl_state['streams_done'] == 0:
+                        task['message'] = 'Downloading video…'
+                    else:
+                        task['message'] = 'Downloading audio…'
                 elif d.get('status') == 'finished':
-                    task['progress'] = 100
-                    task['message'] = 'Download complete, processing…'
+                    _dl_state['streams_done'] += 1
+                    if _dl_state['streams_done'] == 1:
+                        task['progress'] = 85
+                        task['message'] = 'Video downloaded, fetching audio…'
+                    else:
+                        task['progress'] = 95
+                        task['message'] = 'Download complete, processing…'
 
             def _postprocessor_hook(d):
+                task['last_activity'] = time.time()
                 if d.get('status') == 'started':
                     task['status'] = 'merging'
-                    task['progress'] = 100
+                    task['progress'] = 96
                     task['message'] = 'Merging video & audio…'
                 elif d.get('status') == 'finished':
+                    task['progress'] = 99
                     task['message'] = 'Merge complete!'
 
             ydl_opts = {
@@ -1071,6 +1098,7 @@ def _run_video_download(task, video_url, quality, proxies):
                 'no_warnings': True,
                 'outtmpl': output_template,
                 'restrictfilenames': True,
+                'concurrent_fragment_downloads': 8,
                 'progress_hooks': [_progress_hook],
                 'postprocessor_hooks': [_postprocessor_hook],
             }
@@ -1124,23 +1152,26 @@ def _run_audio_download(task, video_url, audio_format, proxies):
             output_template = os.path.join(tmpdir, '%(id)s.%(ext)s')
 
             def _progress_hook(d):
+                task['last_activity'] = time.time()
                 if d.get('status') == 'downloading':
                     task['status'] = 'downloading'
                     total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
                     downloaded = d.get('downloaded_bytes', 0)
                     if total > 0:
-                        task['progress'] = min(int(downloaded / total * 100), 100)
+                        task['progress'] = min(int(downloaded / total * 95), 95)
                     task['message'] = 'Downloading audio…'
                 elif d.get('status') == 'finished':
-                    task['progress'] = 100
+                    task['progress'] = 95
                     task['message'] = 'Download complete, converting…'
 
             def _postprocessor_hook(d):
+                task['last_activity'] = time.time()
                 if d.get('status') == 'started':
                     task['status'] = 'merging'
-                    task['progress'] = 100
+                    task['progress'] = 96
                     task['message'] = f'Converting to .{ext}…'
                 elif d.get('status') == 'finished':
+                    task['progress'] = 99
                     task['message'] = 'Conversion complete!'
 
             ydl_opts = {
@@ -1150,6 +1181,7 @@ def _run_audio_download(task, video_url, audio_format, proxies):
                 'no_warnings': True,
                 'outtmpl': output_template,
                 'restrictfilenames': True,
+                'concurrent_fragment_downloads': 8,
                 'progress_hooks': [_progress_hook],
                 'postprocessor_hooks': [_postprocessor_hook],
             }
