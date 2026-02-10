@@ -7,7 +7,7 @@ import tempfile
 import shutil
 import threading
 import uuid
-from flask import Flask, render_template, request, redirect, url_for, Response, stream_with_context, jsonify
+from flask import Flask, render_template, request, redirect, url_for, Response, stream_with_context, jsonify, send_file
 
 import requests
 from bs4 import BeautifulSoup
@@ -1283,38 +1283,24 @@ def download_progress(task_id):
 
 @app.route('/download_file/<task_id>')
 def download_file(task_id):
-    """Serve the finished file and clean up."""
+    """Serve the finished file.  Temp dir is cleaned later by TTL."""
     task = download_tasks.get(task_id)
-    if not task or task['status'] != 'done':
+    if not task or task['status'] not in ('done', 'served'):
         return 'File not ready', 404
 
-    filepath = task['filepath']
-    filesize = task['filesize']
-    filename = task['filename']
-    mime_type = task['mime_type']
-    tmpdir = task['tmpdir']
+    filepath = task.get('filepath')
+    if not filepath or not os.path.isfile(filepath):
+        return 'File no longer available', 410
 
-    # Remove from tracker (temp dir cleaned after streaming)
-    download_tasks.pop(task_id, None)
+    # Mark as served (keeps task alive for retries; TTL cleanup handles temp dir)
+    task['status'] = 'served'
+    task['last_activity'] = time.time()
 
-    def generate():
-        try:
-            with open(filepath, 'rb') as f:
-                while True:
-                    chunk = f.read(65536)
-                    if not chunk:
-                        break
-                    yield chunk
-        finally:
-            shutil.rmtree(tmpdir, ignore_errors=True)
-
-    return Response(
-        stream_with_context(generate()),
-        headers={
-            'Content-Disposition': f'attachment; filename="{filename}"',
-            'Content-Type': mime_type,
-            'Content-Length': str(filesize),
-        }
+    return send_file(
+        filepath,
+        mimetype=task['mime_type'],
+        as_attachment=True,
+        download_name=task['filename'],
     )
 
 

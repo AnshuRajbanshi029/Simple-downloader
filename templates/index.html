@@ -1152,7 +1152,7 @@
                         stepDl.className = 'dl-step completed';
                         stepMrg.className = 'dl-step active';
                         stepDone.className = 'dl-step';
-                    } else if (data.status === 'done') {
+                    } else if (data.status === 'done' || data.status === 'served') {
                         clearInterval(timer);
                         bar.style.width = '100%';
                         percent.textContent = '100%';
@@ -1161,12 +1161,17 @@
                         stepDone.className = 'dl-step active';
                         msg.textContent = 'Starting download…';
 
-                        // Trigger browser download
+                        // Use a hidden link for reliable large-file downloads
                         setTimeout(function () {
-                            window.location.href = '/download_file/' + taskId;
+                            var a = document.createElement('a');
+                            a.href = '/download_file/' + taskId;
+                            a.style.display = 'none';
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
                             setTimeout(function () {
                                 overlay.classList.remove('active');
-                            }, 1500);
+                            }, 2000);
                         }, 800);
                     } else if (data.status === 'error') {
                         clearInterval(timer);
