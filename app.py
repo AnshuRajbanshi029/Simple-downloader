@@ -1042,7 +1042,7 @@ def _run_video_download(task, video_url, quality, proxies):
                 else:
                     fmt = 'best[ext=mp4]/best'
 
-            output_template = os.path.join(tmpdir, '%(title)s.%(ext)s')
+            output_template = os.path.join(tmpdir, '%(id)s.%(ext)s')
 
             def _progress_hook(d):
                 if d.get('status') == 'downloading':
@@ -1070,6 +1070,7 @@ def _run_video_download(task, video_url, quality, proxies):
                 'quiet': True,
                 'no_warnings': True,
                 'outtmpl': output_template,
+                'restrictfilenames': True,
                 'progress_hooks': [_progress_hook],
                 'postprocessor_hooks': [_postprocessor_hook],
             }
@@ -1120,7 +1121,7 @@ def _run_audio_download(task, video_url, audio_format, proxies):
         task['tmpdir'] = tmpdir
         try:
             ext = audio_format.lower()
-            output_template = os.path.join(tmpdir, '%(title)s.%(ext)s')
+            output_template = os.path.join(tmpdir, '%(id)s.%(ext)s')
 
             def _progress_hook(d):
                 if d.get('status') == 'downloading':
@@ -1148,6 +1149,7 @@ def _run_audio_download(task, video_url, audio_format, proxies):
                 'quiet': True,
                 'no_warnings': True,
                 'outtmpl': output_template,
+                'restrictfilenames': True,
                 'progress_hooks': [_progress_hook],
                 'postprocessor_hooks': [_postprocessor_hook],
             }
