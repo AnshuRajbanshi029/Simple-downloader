@@ -298,14 +298,72 @@ def get_facebook_profile_avatar(profile_url):
     if not profile_url:
         return None
 
+    # Fetch the supplied URL first (could be a post/permalink)
     html = _fetch_html_with_proxies(profile_url) or _fetch_html(profile_url)
     if not html:
         return None
 
-    # Facebook pages usually expose the profile pic via og:image.
-    og_image = _extract_meta_content(html, 'og:image')
-    if og_image:
-        return _clean_image_url(og_image)
+    # Sometimes Facebook embeds JSON blobs that already contain the
+    # author's profile_url and a profile_picture.uri — try those first.
+    m = re.search(r'"profile_picture"\s*:\s*\{[^\}]*"uri"\s*:\s*"([^"]+)"', html)
+    if m:
+        return _clean_image_url(m.group(1).replace('\\/','/'))
+
+    m2 = re.search(r'"profile_url"\s*:\s*"(https?:\\/\\/www\.facebook\.com[^"]+)"', html)
+    if m2:
+        # unescape JSON-style slashes
+        candidate = m2.group(1).replace('\\/','/')
+        # prefer absolute profile link
+        profile_url = candidate
+        html = _fetch_html_with_proxies(profile_url) or _fetch_html(profile_url)
+        if not html:
+            return None
+
+    # If the provided URL looks like a post/permalink (photo, posts, photo.php)
+    # try to discover the author profile URL from the page HTML
+    if re.search(r'/photo[s]?/|/posts/|/permalink|/photo.php|/watch/|/videos?/', profile_url, re.I):
+        # 1) Look for explicit meta 'article:author'
+        author = None
+        m = re.search(r'<meta[^>]+property="article:author"[^>]+content="([^"]+)"', html)
+        if m:
+            author = m.group(1)
+        # 2) Look for rel="author" link
+        if not author:
+            m = re.search(r'<link[^>]+rel="author"[^>]+href="([^"]+)"', html)
+            if m:
+                author = m.group(1)
+        # 3) Fallback: scan hrefs for profile-like path (/username[.numbers]?)
+        if not author:
+            hrefs = re.findall(r'href="(/[^\"\?\#]+)"', html)
+            for h in hrefs:
+                # Skip known non-profile paths
+                if re.search(r'^/(?:photo|photos|watch|videos?|pages|groups|login|marketplace|events)\b', h, re.I):
+                    continue
+                # Profile-like (e.g., /username or /username.123)
+                if re.search(r'^/[A-Za-z0-9\.\-_]{3,}$', h):
+                    author = 'https://www.facebook.com' + h
+                    break
+        if author:
+            profile_url = author
+            html = _fetch_html_with_proxies(profile_url) or _fetch_html(profile_url)
+            if not html:
+                return None
+
+    # Prefer link rel="image_src" which often points to profile picture
+    img_link = None
+    m = re.search(r'<link[^>]+rel="image_src"[^>]+href="([^"]+)"', html)
+    if m:
+        img_link = m.group(1)
+
+    # Fallback to og:image
+    if not img_link:
+        og_image = _extract_meta_content(html, 'og:image')
+        if og_image:
+            img_link = og_image
+
+    # If we found an image link by rel or og, return it now
+    if img_link:
+        return _clean_image_url(img_link)
 
     patterns = [
         r'"profilePicUrl"\s*:\s*"([^"]+)"',
