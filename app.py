@@ -4,6 +4,8 @@ import time
 import base64
 import re
 import json
+import unicodedata
+from difflib import SequenceMatcher
 import tempfile
 import shutil
 import threading
@@ -821,6 +823,102 @@ def _upgrade_spotify_image(url):
     return re.sub(r"(ab67616d0000)[0-9a-f]{4}", r"\1b273", url)
 
 
+# ── Spotify song-matching helpers (ported from spotify_multiplatform_downloader.py) ──
+
+EXCLUDED_HINTS = {
+    "karaoke", "instrumental", "live", "remix", "cover",
+    "nightcore", "8d", "slowed", "sped up", "reverb", "edit", "version",
+}
+
+
+def _normalize_text(value):
+    """Unicode-normalize, strip brackets/feat, lowercase for comparison."""
+    value = value or ""
+    value = unicodedata.normalize("NFKD", value)
+    value = "".join(ch for ch in value if not unicodedata.combining(ch))
+    value = value.lower()
+    value = re.sub(r"\([^)]*\)|\[[^\]]*]|\{[^}]*}", " ", value)
+    value = re.sub(r"\b(ft|feat|featuring)\.?\b", " ", value)
+    value = re.sub(r"[^a-z0-9\s]", " ", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    return value
+
+
+def _contains_excluded_hint(text):
+    norm = _normalize_text(text)
+    for hint in EXCLUDED_HINTS:
+        pattern = r"(?:^|\s)" + re.escape(hint) + r"(?:\s|$)"
+        if re.search(pattern, norm):
+            return True
+    return False
+
+
+def _contains_phrase(haystack_norm, phrase_norm):
+    if not haystack_norm or not phrase_norm:
+        return False
+    pattern = r"(?:^|\s)" + re.escape(phrase_norm) + r"(?:\s|$)"
+    return re.search(pattern, haystack_norm) is not None
+
+
+def _artist_coverage(artists, haystack):
+    """Fraction of artists found (word-boundary) in the candidate text."""
+    if not artists:
+        return 0.0
+    hay = _normalize_text(haystack)
+    hits = 0
+    for artist in artists:
+        token = _normalize_text(artist)
+        if _contains_phrase(hay, token):
+            hits += 1
+    return hits / len(artists)
+
+
+def _score_spotify_candidate(track_title, track_artists, target_dur_s, candidate, tolerance=2):
+    """Score a yt-dlp search result against the Spotify track.
+
+    Returns (score, duration_diff) or None if the candidate is rejected.
+    """
+    title = (candidate.get("title") or "").strip()
+    uploader = (candidate.get("uploader") or candidate.get("channel") or "").strip()
+    duration = candidate.get("duration")
+    url = candidate.get("webpage_url") or candidate.get("url")
+
+    if not title or not url or duration is None:
+        return None
+
+    duration = int(duration)
+    duration_diff = abs(duration - target_dur_s)
+    if duration_diff > tolerance:
+        return None
+
+    combined_text = f"{title} {uploader}"
+    if _contains_excluded_hint(combined_text):
+        return None
+
+    norm_target = _normalize_text(track_title)
+    norm_candidate = _normalize_text(title)
+    title_similarity = SequenceMatcher(None, norm_target, norm_candidate).ratio()
+
+    artist_list = [a.strip() for a in track_artists.split(",")] if isinstance(track_artists, str) else list(track_artists)
+    artist_cov = _artist_coverage(artist_list, combined_text)
+
+    if artist_cov < 0.50:
+        return None
+    if title_similarity < 0.70:
+        return None
+
+    duration_score = 1.0 - (duration_diff / max(tolerance, 1))
+    extractor = (candidate.get("extractor") or "").lower()
+    source_bonus = 0.03  # youtube default
+    if "music" in extractor or "ytmusic" in extractor:
+        source_bonus = 0.05
+    elif "soundcloud" in extractor:
+        source_bonus = 0.02
+
+    score = (title_similarity * 0.60) + (artist_cov * 0.30) + (duration_score * 0.10) + source_bonus
+    return score, duration_diff
+
+
 def get_spotify_metadata(track_url):
     """
     Get Spotify track metadata using ScrapingBee + oEmbed.
@@ -876,6 +974,40 @@ def get_spotify_metadata(track_url):
     track_id = item_id
     artist_id = None  # Will extract from track data
     
+    # APPROACH 0: Spotify Web API (most reliable when credentials are available)
+    client_id = os.environ.get("SPOTIFY_CLIENT_ID")
+    client_secret = os.environ.get("SPOTIFY_CLIENT_SECRET")
+    if client_id and client_secret:
+        try:
+            api_resp = spotify_api_get(f"/v1/tracks/{track_id}")
+            if api_resp.status_code == 200:
+                api_data = api_resp.json()
+                result["title"] = api_data.get("name") or result["title"]
+                api_artists = [a.get("name", "").strip() for a in api_data.get("artists", []) if a.get("name")]
+                if api_artists:
+                    result["uploader"] = ", ".join(api_artists)
+                result["duration_ms"] = int(api_data.get("duration_ms") or 0) or result["duration_ms"]
+                if result["duration_ms"]:
+                    result["duration"] = _format_duration(result["duration_ms"])
+                album_images = (api_data.get("album") or {}).get("images") or []
+                if album_images:
+                    result["thumbnail"] = album_images[0]["url"]
+                # Fetch artist image
+                if api_data.get("artists"):
+                    first_artist = api_data["artists"][0]
+                    artist_id = first_artist.get("id")
+                    if artist_id:
+                        try:
+                            artist_resp = spotify_api_get(f"/v1/artists/{artist_id}")
+                            if artist_resp.status_code == 200:
+                                a_images = artist_resp.json().get("images") or []
+                                if a_images:
+                                    result["artist_image"] = a_images[0]["url"]
+                        except Exception:
+                            pass
+        except Exception as e:
+            print(f"Spotify API Error: {e}")
+
     # APPROACH 1: Scrape embed page via ScrapingBee (has all metadata including duration)
     embed_url = f"https://open.spotify.com/embed/track/{track_id}"
     
@@ -1373,6 +1505,203 @@ def _run_audio_download(task, video_url, audio_format, proxies):
     unreserve_download()  # give back the reserved slot
 
 
+def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_format, proxies):
+    """Search YouTube for a Spotify track match and download it as audio."""
+    target_dur_s = int(round(duration_ms / 1000))
+    search_query = f"{track_artist} - {track_title}"
+    ext = (audio_format or 'mp3').lower()
+
+    task['status'] = 'downloading'
+    task['message'] = 'Searching for matching song…'
+    task['progress'] = 5
+
+    # ── Phase 1: Search YouTube + YouTube Music via proxies ──
+    all_entries = []
+    shuffled = proxies.copy()
+    random.shuffle(shuffled)
+    search_proxy = shuffled[0] if shuffled else None
+
+    search_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'ignoreerrors': True,
+        'skip_download': True,
+        'noplaylist': False,
+        'extract_flat': 'in_playlist',
+        'socket_timeout': 25,
+    }
+    if search_proxy:
+        search_opts['proxy'] = f"http://{search_proxy}"
+
+    for prefix in (f'ytsearch10:{search_query}', f'ytsearch10:{track_title} {track_artist} audio'):
+        try:
+            with yt_dlp.YoutubeDL(search_opts) as ydl:
+                info = ydl.extract_info(prefix, download=False)
+                if info and info.get('entries'):
+                    all_entries.extend([e for e in info['entries'] if e])
+        except Exception:
+            pass
+
+    task['progress'] = 20
+    task['message'] = f'Found {len(all_entries)} candidates, scoring…'
+
+    if not all_entries:
+        task['status'] = 'error'
+        task['error'] = 'No search results found'
+        task['message'] = f'Could not find "{search_query}" on YouTube.'
+        unreserve_download()
+        return
+
+    # ── Phase 2: Enrich flat entries (get duration) and score ──
+    scored = []
+    seen_urls = set()
+    enrich_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'ignoreerrors': True,
+        'skip_download': True,
+        'socket_timeout': 20,
+    }
+    if search_proxy:
+        enrich_opts['proxy'] = f"http://{search_proxy}"
+
+    for entry in all_entries:
+        url = entry.get('webpage_url') or entry.get('url')
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        # Enrich if missing duration or title
+        if not entry.get('duration') or not entry.get('title'):
+            try:
+                with yt_dlp.YoutubeDL(enrich_opts) as ydl:
+                    detailed = ydl.extract_info(url, download=False)
+                    if detailed:
+                        if detailed.get('entries'):
+                            first = next((x for x in detailed.get('entries', []) if x), None)
+                            entry = first or detailed
+                        else:
+                            entry = detailed
+            except Exception:
+                continue
+
+        result = _score_spotify_candidate(track_title, track_artist, target_dur_s, entry, tolerance=2)
+        if result:
+            score, dur_diff = result
+            scored.append((score, dur_diff, entry))
+
+    task['progress'] = 35
+
+    if not scored:
+        task['status'] = 'error'
+        task['error'] = 'No matching song found'
+        task['message'] = f'No YouTube result matched "{track_title}" within ±2s duration.'
+        unreserve_download()
+        return
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    best_score, best_diff, best_entry = scored[0]
+    best_url = best_entry.get('webpage_url') or best_entry.get('url')
+    print(f"[spotify-dl] Best match: \"{best_entry.get('title')}\" score={best_score:.3f} dur_diff={best_diff}s url={best_url}")
+
+    task['progress'] = 40
+    task['message'] = f'Downloading: {best_entry.get("title", "track")}…'
+
+    # ── Phase 3: Download best match as audio via proxies ──
+    for proxy in shuffled:
+        tmpdir = tempfile.mkdtemp()
+        task['tmpdir'] = tmpdir
+        try:
+            output_template = os.path.join(tmpdir, '%(id)s.%(ext)s')
+
+            def _progress_hook(d):
+                task['last_activity'] = time.time()
+                if d.get('status') == 'downloading':
+                    task['status'] = 'downloading'
+                    total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
+                    downloaded = d.get('downloaded_bytes', 0)
+                    if total > 0:
+                        # Map download progress to 40-90%
+                        task['progress'] = min(40 + int(downloaded / total * 50), 90)
+                    task['message'] = 'Downloading audio…'
+                elif d.get('status') == 'finished':
+                    task['progress'] = 90
+                    task['message'] = 'Download complete, converting…'
+
+            def _postprocessor_hook(d):
+                task['last_activity'] = time.time()
+                if d.get('status') == 'started':
+                    task['status'] = 'merging'
+                    task['progress'] = 92
+                    task['message'] = f'Converting to .{ext}…'
+                elif d.get('status') == 'finished':
+                    task['progress'] = 98
+                    task['message'] = 'Conversion complete!'
+
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'proxy': f"http://{proxy}",
+                'quiet': True,
+                'no_warnings': True,
+                'outtmpl': output_template,
+                'restrictfilenames': True,
+                'noplaylist': True,
+                'socket_timeout': 30,
+                'concurrent_fragment_downloads': 8,
+                'extractor_args': {'youtube': {'player_client': ['ios,web']}},
+                'progress_hooks': [_progress_hook],
+                'postprocessor_hooks': [_postprocessor_hook],
+            }
+            if HAS_FFMPEG:
+                ydl_opts['postprocessors'] = [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': ext,
+                    'preferredquality': '0',
+                }]
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([best_url])
+
+                downloaded_files = [
+                    f for f in os.listdir(tmpdir)
+                    if not f.endswith('.part') and not f.endswith('.ytdl')
+                ]
+                if not downloaded_files:
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+                    continue
+
+                filepath = os.path.join(tmpdir, downloaded_files[0])
+                actual_ext = os.path.splitext(downloaded_files[0])[1].lstrip('.') or ext
+                safe_filename = re.sub(r'[^\w\-_.]', '_', f"{track_artist} - {track_title}")[:100] + f'.{actual_ext}'
+
+                mime_map = {
+                    'mp3': 'audio/mpeg',
+                    'wav': 'audio/wav',
+                    'm4a': 'audio/mp4',
+                    'opus': 'audio/opus',
+                    'webm': 'audio/webm',
+                    'ogg': 'audio/ogg',
+                }
+
+                task['filepath'] = filepath
+                task['filename'] = safe_filename
+                task['filesize'] = os.path.getsize(filepath)
+                task['mime_type'] = mime_map.get(actual_ext, f'audio/{actual_ext}')
+                task['status'] = 'done'
+                task['progress'] = 100
+                task['message'] = 'Ready to download!'
+                return
+
+        except Exception as e:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            continue
+
+    task['status'] = 'error'
+    task['error'] = 'All proxies failed during download'
+    task['message'] = 'Download failed — please try again.'
+    unreserve_download()
+
+
 # ── API routes for task-based downloads ────────────────────────────────────
 
 @app.route('/download_start', methods=['POST'])
@@ -1380,7 +1709,7 @@ def download_start():
     """Kick off a download in the background and return a task ID."""
     data = request.get_json(force=True)
     video_url = data.get('url')
-    dl_type = data.get('type', 'video')        # 'video' or 'audio'
+    dl_type = data.get('type', 'video')        # 'video', 'audio', or 'spotify'
     quality = data.get('quality', 'best')       # 'best' or 'worst'
     audio_format = data.get('format', 'mp3')    # 'mp3' or 'wav'
 
@@ -1393,7 +1722,32 @@ def download_start():
 
     task = _make_task()
 
-    if dl_type == 'audio':
+    if dl_type == 'spotify':
+        # Spotify download: use metadata from request body
+        track_title = data.get('track_title', '')
+        track_artist = data.get('track_artist', '')
+        duration_ms = int(data.get('duration_ms', 0))
+
+        if not track_title or not track_artist or duration_ms <= 0:
+            # Fallback: fetch metadata server-side
+            try:
+                sp_meta = get_spotify_metadata(video_url)
+                track_title = track_title or sp_meta.get('title', 'Unknown Track')
+                track_artist = track_artist or sp_meta.get('uploader', 'Unknown Artist')
+                duration_ms = duration_ms or sp_meta.get('duration_ms', 0)
+            except Exception:
+                pass
+
+        if not track_title or not track_artist or duration_ms <= 0:
+            unreserve_download()
+            return jsonify({'error': 'Could not determine track metadata for Spotify download.'}), 400
+
+        t = threading.Thread(
+            target=_run_spotify_download,
+            args=(task, track_title, track_artist, duration_ms, audio_format, PROXIES),
+            daemon=True,
+        )
+    elif dl_type == 'audio':
         t = threading.Thread(
             target=_run_audio_download,
             args=(task, video_url, audio_format, PROXIES),
