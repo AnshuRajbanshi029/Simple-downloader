@@ -294,6 +294,94 @@ def get_instagram_user_avatar(user_id):
     return None
 
 
+def _resolve_fb_numeric_id_to_slug(numeric_id):
+    """Convert a Facebook numeric user/page ID to its username slug.
+
+    A HEAD request to ``facebook.com/{numeric_id}`` with the
+    ``facebookexternalhit`` user-agent follows a redirect straight to
+    ``facebook.com/{slug}``.  Works for both Pages and personal profiles
+    without authentication.
+    """
+    if not numeric_id or not str(numeric_id).isdigit():
+        return None
+
+    try:
+        r = requests.head(
+            f"https://www.facebook.com/{numeric_id}",
+            headers={
+                "User-Agent": "facebookexternalhit/1.1",
+                "Accept": "text/html",
+            },
+            timeout=15,
+            allow_redirects=True,
+        )
+        m = re.search(
+            r'facebook\.com/([A-Za-z0-9._-]+)/?(?:\?.*)?$', r.url
+        )
+        if m:
+            slug = m.group(1)
+            # Make sure we actually got a redirect (slug != original ID)
+            if slug != str(numeric_id):
+                return slug
+    except Exception:
+        pass
+    return None
+
+
+def get_facebook_avatar_via_graph_api(uploader_id=None, webpage_url=None):
+    """Fetch a Facebook Page's profile picture via the public Graph API.
+
+    Strategy
+    ────────
+    1. Try to extract the page slug directly from ``webpage_url``
+       (e.g. ``facebook.com/isakhantravel/videos/…`` → ``isakhantravel``).
+    2. If that fails, resolve the numeric ``uploader_id`` to a slug via the
+       login-wall redirect trick.
+    3. Query ``graph.facebook.com/{slug}/picture?type=large&redirect=false``
+       and return the image URL only if ``is_silhouette`` is ``false``.
+
+    Returns the avatar URL string, or ``None``.
+    """
+    slug = None
+
+    # ── Phase A: extract slug from webpage_url ──
+    SKIP_SEGMENTS = {
+        'watch', 'reel', 'story.php', 'video.php', 'videos',
+        'groups', 'events', 'plugins', 'posts', 'reels',
+        'photo.php', 'permalink.php', 'ads', 'live',
+    }
+    if webpage_url:
+        m = re.search(r'facebook\.com/([A-Za-z0-9._-]+)(?:/|$)', webpage_url)
+        if m and m.group(1) not in SKIP_SEGMENTS:
+            slug = m.group(1)
+
+    # ── Phase B: resolve numeric ID → slug ──
+    if not slug and uploader_id:
+        slug = _resolve_fb_numeric_id_to_slug(uploader_id)
+
+    if not slug:
+        return None
+
+    # ── Phase C: query Graph API ──
+    graph_url = (
+        f"https://graph.facebook.com/{slug}/picture"
+        f"?type=large&redirect=false"
+    )
+    try:
+        resp = requests.get(graph_url, timeout=10)
+        if resp.status_code != 200:
+            return None
+        data = resp.json().get('data', {})
+        if data.get('is_silhouette'):
+            return None
+        pic_url = data.get('url')
+        if pic_url:
+            return _clean_image_url(pic_url)
+    except Exception:
+        pass
+    return None
+
+
 def _is_fb_default_avatar(url):
     """Return True if ``url`` looks like Facebook's generic default avatar.
 
@@ -852,24 +940,15 @@ def index():
                         or info.get('avatar')
                     )
                     if not avatar:
-                        # The actual video/post page contains rich embedded JSON
-                        # with the poster's profile_picture — prefer that over
-                        # the uploader's profile page (which Facebook blocks
-                        # for unauthenticated requests).
+                        # ── PRIMARY: Graph API (fast & reliable for Pages) ──
+                        avatar = get_facebook_avatar_via_graph_api(
+                            uploader_id=info.get('uploader_id'),
+                            webpage_url=info.get('webpage_url'),
+                        )
+                    if not avatar:
+                        # ── FALLBACK: HTML-scrape the video page ──
                         video_page = info.get('webpage_url') or info.get('url')
                         avatar = get_facebook_profile_avatar(video_page)
-                        # Fallback: try the uploader/channel profile URL
-                        if not avatar:
-                            profile_url = info.get('uploader_url') or info.get('channel_url')
-                            if not profile_url:
-                                wp = info.get('webpage_url', '')
-                                m_slug = re.search(r'facebook\.com/([^/?]+)', wp)
-                                if m_slug:
-                                    slug = m_slug.group(1)
-                                    if slug not in {'watch', 'reel', 'videos', 'story.php'}:
-                                        profile_url = f"https://www.facebook.com/{slug}"
-                            if profile_url:
-                                avatar = get_facebook_profile_avatar(profile_url)
 
                     if avatar:
                         info['artist_image'] = avatar
