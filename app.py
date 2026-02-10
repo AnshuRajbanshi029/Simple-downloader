@@ -152,6 +152,64 @@ def get_youtube_channel_avatar(channel_id):
     return None
 
 
+def _fetch_html_with_proxies(url):
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.google.com/"
+    }
+    shuffled_proxies = PROXIES.copy()
+    random.shuffle(shuffled_proxies)
+
+    for proxy in shuffled_proxies:
+        try:
+            proxy_url = f"http://{proxy}"
+            response = requests.get(
+                url,
+                headers=headers,
+                proxies={'http': proxy_url, 'https': proxy_url},
+                timeout=15
+            )
+            if response.status_code == 200:
+                return response.text
+        except Exception:
+            continue
+    return None
+
+
+def _clean_tiktok_url(url):
+    if not url:
+        return None
+    return (url
+            .replace('\\u002F', '/')
+            .replace('\\/', '/')
+            .replace('\\u003D', '=')
+            .replace('\\u0026', '&'))
+
+
+def get_tiktok_profile_avatar(profile_url):
+    if not profile_url:
+        return None
+
+    html = _fetch_html_with_proxies(profile_url) or _fetch_html(profile_url)
+    if not html:
+        return None
+
+    patterns = [
+        r'"avatarLarger"\s*:\s*"([^"]+)"',
+        r'"avatarMedium"\s*:\s*"([^"]+)"',
+        r'"avatarThumb"\s*:\s*"([^"]+)"',
+        r'"avatar"\s*:\s*"([^"]+)"',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, html)
+        if match:
+            return _clean_tiktok_url(match.group(1))
+
+    return None
+
+
 def extract_video_info(video_url):
     """Try all proxies until one succeeds."""
     shuffled_proxies = PROXIES.copy()
@@ -580,6 +638,20 @@ def index():
                     or info.get('uploader_thumbnail')
                     or info.get('avatar')
                 )
+                if not avatar:
+                    profile_url = info.get('uploader_url')
+                    if not profile_url:
+                        uploader_id = info.get('uploader_id') or info.get('uploader')
+                        if uploader_id:
+                            profile_url = f"https://www.tiktok.com/@{uploader_id}"
+                    if not profile_url:
+                        webpage_url = info.get('webpage_url')
+                        if webpage_url:
+                            match = re.search(r'tiktok\.com/@([^/?]+)', webpage_url)
+                            if match:
+                                profile_url = f"https://www.tiktok.com/@{match.group(1)}"
+                    avatar = get_tiktok_profile_avatar(profile_url)
+
                 if avatar:
                     info['artist_image'] = avatar
 
