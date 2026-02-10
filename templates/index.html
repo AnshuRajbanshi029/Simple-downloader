@@ -1239,13 +1239,13 @@
             var stepMrgSub = document.getElementById('stepMergeSub');
 
             title.textContent = 'Downloading from Spotify';
-            stepDlSub.textContent = 'Searching & downloading audio…';
+            stepDlSub.textContent = 'Downloading audio…';
             stepMrg.querySelector('.dl-step-label').textContent = 'Converting Format';
             stepMrgSub.textContent = 'Converting to .' + (fmt || 'mp3');
 
             bar.style.width = '0%';
             percent.textContent = '0%';
-            msg.textContent = 'Searching for matching song…';
+            msg.textContent = 'Starting download…';
             msg.classList.remove('dl-progress-error');
             stepDl.className = 'dl-step active';
             stepMrg.className = 'dl-step';

@@ -1518,7 +1518,7 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
     ext = (audio_format or 'mp3').lower()
 
     task['status'] = 'downloading'
-    task['message'] = 'Searching for matching song…'
+    task['message'] = 'Downloading from Spotify…'
     task['progress'] = 5
 
     shuffled = proxies.copy()
@@ -1569,7 +1569,7 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
             continue
 
     task['progress'] = 25
-    task['message'] = f'Found {len(search_results)} results, matching duration…'
+    task['message'] = 'Processing…'
 
     print(f"[spotify-dl] Found {len(search_results)} YouTube results for \"{search_query}\" (target: {target_dur_s}s)")
     for r in search_results:
@@ -1602,7 +1602,7 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
     print(f"[spotify-dl] Best match: \"{best_match['title']}\" ({best_match['duration']}s, diff: {best_diff}s)")
 
     task['progress'] = 35
-    task['message'] = f'Downloading: {best_match["title"]}…'
+    task['message'] = 'Downloading audio…'
 
     # ── Phase 3: Download best match as audio via proxies ──
     for proxy in shuffled:
