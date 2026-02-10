@@ -3,6 +3,7 @@ import random
 import time
 import base64
 import re
+import json
 import tempfile
 import shutil
 import threading
@@ -60,6 +61,73 @@ def _cleanup_task(task_id):
     task = download_tasks.pop(task_id, None)
     if task and task.get('tmpdir'):
         shutil.rmtree(task['tmpdir'], ignore_errors=True)
+
+
+# ── Global download limiter (100 per 24 h across all platforms) ───────────
+DAILY_DOWNLOAD_LIMIT = 100
+_DL_LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.download_log.json')
+_dl_log_lock = threading.Lock()
+
+
+def _load_download_log():
+    """Load timestamps from disk. Caller must hold _dl_log_lock."""
+    try:
+        with open(_DL_LOG_FILE, 'r') as f:
+            data = json.load(f)
+            if isinstance(data, list):
+                return data
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    return []
+
+
+def _save_download_log(log):
+    """Persist timestamps to disk atomically. Caller must hold _dl_log_lock."""
+    tmp = _DL_LOG_FILE + '.tmp'
+    try:
+        with open(tmp, 'w') as f:
+            json.dump(log, f)
+        # Atomic rename (as atomic as the OS allows)
+        if os.path.exists(_DL_LOG_FILE):
+            os.replace(tmp, _DL_LOG_FILE)
+        else:
+            os.rename(tmp, _DL_LOG_FILE)
+    except OSError:
+        pass
+
+
+def _prune_log(log):
+    """Remove entries older than 24 hours. Returns pruned list."""
+    cutoff = time.time() - 86400
+    return [ts for ts in log if ts > cutoff]
+
+
+def downloads_remaining():
+    """How many downloads are still allowed in the current 24-h window."""
+    with _dl_log_lock:
+        log = _prune_log(_load_download_log())
+        return max(DAILY_DOWNLOAD_LIMIT - len(log), 0)
+
+
+def try_reserve_download():
+    """Atomically check limit AND record a download. Returns True if allowed."""
+    with _dl_log_lock:
+        log = _prune_log(_load_download_log())
+        if len(log) >= DAILY_DOWNLOAD_LIMIT:
+            return False
+        log.append(time.time())
+        _save_download_log(log)
+        return True
+
+
+def unreserve_download():
+    """Remove the most recent entry (e.g. if download actually failed)."""
+    with _dl_log_lock:
+        log = _prune_log(_load_download_log())
+        if log:
+            log.pop()
+            _save_download_log(log)
+
 
 # Residential Proxies - rotates randomly for each request
 PROXIES = [
@@ -897,7 +965,7 @@ def index():
     if request.method == 'POST':
         video_url = request.form.get('url')
         if not video_url:
-            return render_template('index.html', error="Please enter a URL", platforms=PLATFORMS)
+            return render_template('index.html', error="Please enter a URL", platforms=PLATFORMS, downloads_remaining=downloads_remaining())
         
         try:
             platform_id, platform_config = detect_platform(video_url)
@@ -1018,11 +1086,12 @@ def index():
                                    url=video_url, 
                                    platform=platform_config,
                                    platform_id=platform_id,
-                                   platforms=PLATFORMS)
+                                   platforms=PLATFORMS,
+                                   downloads_remaining=downloads_remaining())
         except Exception as e:
-            return render_template('index.html', error=str(e), platforms=PLATFORMS)
+            return render_template('index.html', error=str(e), platforms=PLATFORMS, downloads_remaining=downloads_remaining())
             
-    return render_template('index.html', platforms=PLATFORMS)
+    return render_template('index.html', platforms=PLATFORMS, downloads_remaining=downloads_remaining())
 
 # ── Background download worker ───────────────────────────────────────────
 def _run_video_download(task, video_url, quality, proxies):
@@ -1137,6 +1206,7 @@ def _run_video_download(task, video_url, quality, proxies):
     task['status'] = 'error'
     task['error'] = 'All proxies failed'
     task['message'] = 'Download failed — please try again.'
+    unreserve_download()  # give back the reserved slot
 
 
 def _run_audio_download(task, video_url, audio_format, proxies):
@@ -1233,6 +1303,7 @@ def _run_audio_download(task, video_url, audio_format, proxies):
     task['status'] = 'error'
     task['error'] = 'All proxies failed'
     task['message'] = 'Download failed — please try again.'
+    unreserve_download()  # give back the reserved slot
 
 
 # ── API routes for task-based downloads ────────────────────────────────────
@@ -1248,6 +1319,10 @@ def download_start():
 
     if not video_url:
         return jsonify({'error': 'No URL provided'}), 400
+
+    # Atomic check+reserve — no race condition possible
+    if not try_reserve_download():
+        return jsonify({'error': 'Daily download limit reached (100/day). Try again later.'}), 429
 
     task = _make_task()
 
@@ -1266,6 +1341,12 @@ def download_start():
     t.start()
 
     return jsonify({'task_id': task['id']})
+
+
+@app.route('/downloads_remaining')
+def api_downloads_remaining():
+    """Return how many downloads are left in the 24-h window."""
+    return jsonify({'remaining': downloads_remaining(), 'limit': DAILY_DOWNLOAD_LIMIT})
 
 
 @app.route('/download_progress/<task_id>')
@@ -1292,9 +1373,14 @@ def download_file(task_id):
     if not filepath or not os.path.isfile(filepath):
         return 'File no longer available', 410
 
-    # Mark as served (keeps task alive for retries; TTL cleanup handles temp dir)
+    # Cap re-serves at 3 to prevent abuse of a single task ID
+    serve_count = task.get('_serve_count', 0)
+    if serve_count >= 3:
+        return 'Download link expired', 410
+
     task['status'] = 'served'
     task['last_activity'] = time.time()
+    task['_serve_count'] = serve_count + 1
 
     return send_file(
         filepath,

@@ -72,6 +72,29 @@
             font-size: 1.2rem;
         }
 
+        .downloads-remaining {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 10px;
+            padding: 6px 16px;
+            border-radius: 20px;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.1);
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+        .downloads-remaining .dl-count {
+            font-weight: 700;
+            color: #6ee7b7;
+        }
+        .downloads-remaining.low .dl-count {
+            color: #fbbf24;
+        }
+        .downloads-remaining.depleted .dl-count {
+            color: #f87171;
+        }
+
         .platform-icons {
             display: flex;
             justify-content: center;
@@ -885,6 +908,10 @@
         <div class="header">
             <h1>Multi Downloader</h1>
             <p>Download from YouTube, TikTok, Facebook, Instagram & Spotify</p>
+            <div class="downloads-remaining" id="dlRemaining">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <span><span class="dl-count" id="dlCount">{{ downloads_remaining if downloads_remaining is defined else 100 }}</span> / 100 downloads remaining today</span>
+            </div>
         </div>
 
         <div class="platform-icons">
@@ -1064,6 +1091,21 @@
         /* -------- Download Progress System -------- */
         var DOWNLOAD_URL = '{{ url | default("", true) }}';
 
+        function updateDlCounter() {
+            fetch('/downloads_remaining')
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                var el = document.getElementById('dlCount');
+                var wrap = document.getElementById('dlRemaining');
+                if (!el) return;
+                el.textContent = d.remaining;
+                wrap.classList.remove('low', 'depleted');
+                if (d.remaining <= 0) wrap.classList.add('depleted');
+                else if (d.remaining <= 20) wrap.classList.add('low');
+            })
+            .catch(function () {});
+        }
+
         function startDownload(type, quality, fmt) {
             var overlay  = document.getElementById('dlProgressOverlay');
             var bar      = document.getElementById('dlBar');
@@ -1115,8 +1157,10 @@
                     msg.textContent = data.error;
                     msg.classList.add('dl-progress-error');
                     setTimeout(function () { overlay.classList.remove('active'); }, 3000);
+                    updateDlCounter();
                     return;
                 }
+                updateDlCounter();
                 pollProgress(data.task_id);
             })
             .catch(function (err) {
