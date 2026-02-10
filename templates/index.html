@@ -1038,6 +1038,27 @@
                 loader.classList.add('active');
                 submitBtn.disabled = true;
             });
+
+            {% if video_info %}
+            // Play a short, soft success tone when info is fetched.
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.value = 523.25; // C5
+                gain.gain.value = 0.05;
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start();
+                osc.stop(ctx.currentTime + 0.18);
+                osc.onended = function () {
+                    ctx.close();
+                };
+            } catch (e) {
+                // Ignore audio errors (e.g., blocked by browser policy).
+            }
+            {% endif %}
         });
 
         /* -------- Download Progress System -------- */
