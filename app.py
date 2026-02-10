@@ -233,26 +233,52 @@ def _pick_best_thumbnail(thumbnails):
     return best.get('url') or best.get('src')
 
 
-def get_instagram_profile_avatar(profile_url):
-    if not profile_url:
+def get_instagram_user_avatar(user_id):
+    """Fetch an Instagram user's profile picture via the internal mobile API.
+
+    ``user_id`` is the numeric ID that yt_dlp returns as ``uploader_id``.
+    The ``i.instagram.com`` endpoint works without authentication when called
+    through our proxies with an Android user-agent.
+    """
+    if not user_id:
         return None
 
-    html = _fetch_html_with_proxies(profile_url) or _fetch_html(profile_url)
-    if not html:
-        return None
+    api_url = f"https://i.instagram.com/api/v1/users/{user_id}/info/"
+    ig_headers = {
+        "User-Agent": (
+            "Instagram 275.0.0.27.98 Android "
+            "(33/13; 420dpi; 1080x2400; samsung; SM-G991B; "
+            "o1s; exynos2100; en_US; 458229237)"
+        ),
+        "X-IG-App-ID": "936619743392459",
+    }
 
-    patterns = [
-        r'"profile_pic_url_hd"\s*:\s*"([^"]+)"',
-        r'"profile_pic_url"\s*:\s*"([^"]+)"',
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, html)
-        if match:
-            return _clean_instagram_url(match.group(1))
+    shuffled = PROXIES.copy()
+    random.shuffle(shuffled)
 
-    og_image = _extract_meta_content(html, 'og:image')
-    if og_image:
-        return _clean_instagram_url(og_image)
+    for proxy in shuffled[:4]:                       # try up to 4 proxies
+        try:
+            proxy_url = f"http://{proxy}"
+            resp = requests.get(
+                api_url,
+                headers=ig_headers,
+                proxies={"http": proxy_url, "https": proxy_url},
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                continue
+            user = resp.json().get("user", {})
+            # Prefer HD, fall back to standard
+            hd = user.get("hd_profile_pic_url_info", {})
+            pic = (
+                hd.get("url")
+                or user.get("profile_pic_url_hd")
+                or user.get("profile_pic_url")
+            )
+            if pic:
+                return pic
+        except Exception:
+            continue
 
     return None
 
@@ -711,6 +737,7 @@ def index():
                 if not info.get('thumbnail'):
                     info['thumbnail'] = _pick_best_thumbnail(info.get('thumbnails', []))
 
+                # ── Avatar: fetch via Instagram's internal user API ──
                 if not info.get('artist_image'):
                     avatar = (
                         info.get('uploader_avatar')
@@ -719,15 +746,26 @@ def index():
                         or info.get('avatar')
                     )
                     if not avatar:
-                        profile_url = info.get('uploader_url')
-                        if not profile_url:
-                            uploader_id = info.get('uploader_id') or info.get('uploader')
-                            if uploader_id:
-                                profile_url = f"https://www.instagram.com/{uploader_id}/"
-                        avatar = get_instagram_profile_avatar(profile_url)
+                        # yt_dlp's uploader_id is the numeric user ID
+                        avatar = get_instagram_user_avatar(
+                            info.get('uploader_id')
+                        )
 
                     if avatar:
                         info['artist_image'] = avatar
+
+                # ── Proxy Instagram CDN images through our server ──
+                # Instagram CDN URLs can be geo-blocked or expire for
+                # direct browser requests, so we proxy them to be safe.
+                from urllib.parse import quote as _url_quote
+                if info.get('artist_image'):
+                    info['artist_image'] = (
+                        '/proxy_image?url=' + _url_quote(info['artist_image'], safe='')
+                    )
+                if info.get('thumbnail'):
+                    info['thumbnail'] = (
+                        '/proxy_image?url=' + _url_quote(info['thumbnail'], safe='')
+                    )
 
                 duration_display = _format_duration_seconds(info.get('duration'))
                 if duration_display:
@@ -1014,6 +1052,66 @@ def download_file(task_id):
             'Content-Length': str(filesize),
         }
     )
+
+
+# ── Image proxy  (Instagram CDN returns 403 to bare browser requests) ─────
+
+@app.route('/proxy_image')
+def proxy_image():
+    """Proxy an external image through this server.
+
+    Usage:  /proxy_image?url=<encoded-image-url>
+    Only allows scontent*.cdninstagram.com and *.fbcdn.net hosts so we don't
+    become an open proxy.
+    """
+    from urllib.parse import urlparse
+
+    img_url = request.args.get('url', '')
+    if not img_url:
+        return '', 204
+
+    host = urlparse(img_url).hostname or ''
+    allowed = host.endswith('.cdninstagram.com') or host.endswith('.fbcdn.net')
+    if not allowed:
+        return '', 403
+
+    try:
+        proxy_str = random.choice(PROXIES)
+        proxy_url = f"http://{proxy_str}"
+        resp = requests.get(
+            img_url,
+            headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                              'AppleWebKit/537.36 (KHTML, like Gecko) '
+                              'Chrome/120.0.0.0 Safari/537.36',
+                'Referer': 'https://www.instagram.com/',
+                'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+            },
+            proxies={'http': proxy_url, 'https': proxy_url},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            # Retry without proxy
+            resp = requests.get(
+                img_url,
+                headers={
+                    'User-Agent': 'Mozilla/5.0',
+                    'Referer': 'https://www.instagram.com/',
+                    'Accept': 'image/*,*/*;q=0.8',
+                },
+                timeout=10,
+            )
+        if resp.status_code != 200:
+            return '', resp.status_code
+
+        ct = resp.headers.get('Content-Type', 'image/jpeg')
+        return Response(
+            resp.content,
+            content_type=ct,
+            headers={'Cache-Control': 'public, max-age=86400'},
+        )
+    except Exception:
+        return '', 502
 
 
 # Legacy direct-download routes (kept as fallbacks) ────────────────────────
