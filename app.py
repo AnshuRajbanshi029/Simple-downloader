@@ -1506,7 +1506,13 @@ def _run_audio_download(task, video_url, audio_format, proxies):
 
 
 def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_format, proxies):
-    """Search YouTube for a Spotify track match and download it as audio."""
+    """Search YouTube for a Spotify track match and download it as audio.
+
+    Matches the proven approach from Spotify-Scraper/server/routes.ts:
+    search YouTube, filter by ±2s duration, pick closest match.
+    """
+    import subprocess
+
     target_dur_s = int(round(duration_ms / 1000))
     search_query = f"{track_artist} - {track_title}"
     ext = (audio_format or 'mp3').lower()
@@ -1515,97 +1521,88 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
     task['message'] = 'Searching for matching song…'
     task['progress'] = 5
 
-    # ── Phase 1: Search YouTube + YouTube Music via proxies ──
-    all_entries = []
     shuffled = proxies.copy()
     random.shuffle(shuffled)
-    search_proxy = shuffled[0] if shuffled else None
 
-    search_opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'ignoreerrors': True,
-        'skip_download': True,
-        'noplaylist': False,
-        'extract_flat': 'in_playlist',
-        'socket_timeout': 25,
-    }
-    if search_proxy:
-        search_opts['proxy'] = f"http://{search_proxy}"
+    # ── Phase 1: Search YouTube via yt-dlp CLI (same as routes.ts) ──
+    # Uses --flat-playlist --print to get id, title, duration in one fast call
+    yt_dlp_path = shutil.which('yt-dlp') or 'yt-dlp'
+    search_results = []
 
-    for prefix in (f'ytsearch10:{search_query}', f'ytsearch10:{track_title} {track_artist} audio'):
+    for proxy in shuffled[:3]:  # Try up to 3 proxies for search
         try:
-            with yt_dlp.YoutubeDL(search_opts) as ydl:
-                info = ydl.extract_info(prefix, download=False)
-                if info and info.get('entries'):
-                    all_entries.extend([e for e in info['entries'] if e])
-        except Exception:
-            pass
+            cmd = [
+                yt_dlp_path,
+                f'ytsearch10:{search_query}',
+                '--flat-playlist',
+                '--print', '%(id)s\t%(title)s\t%(duration)s',
+                '--no-download',
+                '--proxy', f'http://{proxy}',
+            ]
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=30,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            )
+            if proc.stdout.strip():
+                for line in proc.stdout.strip().split('\n'):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    parts = line.split('\t')
+                    if len(parts) >= 3:
+                        vid_id = parts[0].strip()
+                        vid_title = parts[1].strip()
+                        try:
+                            vid_dur = int(round(float(parts[2].strip())))
+                        except (ValueError, TypeError):
+                            continue
+                        if vid_id and vid_dur > 0:
+                            search_results.append({
+                                'id': vid_id,
+                                'title': vid_title,
+                                'duration': vid_dur,
+                            })
+                if search_results:
+                    break
+        except Exception as e:
+            print(f"[spotify-dl] Search failed with proxy: {e}")
+            continue
 
-    task['progress'] = 20
-    task['message'] = f'Found {len(all_entries)} candidates, scoring…'
+    task['progress'] = 25
+    task['message'] = f'Found {len(search_results)} results, matching duration…'
 
-    if not all_entries:
+    print(f"[spotify-dl] Found {len(search_results)} YouTube results for \"{search_query}\" (target: {target_dur_s}s)")
+    for r in search_results:
+        diff = abs(r['duration'] - target_dur_s)
+        print(f"  - [{r['id']}] \"{r['title']}\" duration: {r['duration']}s (diff: {diff}s)")
+
+    if not search_results:
         task['status'] = 'error'
         task['error'] = 'No search results found'
         task['message'] = f'Could not find "{search_query}" on YouTube.'
         unreserve_download()
         return
 
-    # ── Phase 2: Enrich flat entries (get duration) and score ──
-    scored = []
-    seen_urls = set()
-    enrich_opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'ignoreerrors': True,
-        'skip_download': True,
-        'socket_timeout': 20,
-    }
-    if search_proxy:
-        enrich_opts['proxy'] = f"http://{search_proxy}"
+    # ── Phase 2: Filter by ±2s duration (same as routes.ts line 259-261) ──
+    matched = [r for r in search_results if abs(r['duration'] - target_dur_s) <= 2]
 
-    for entry in all_entries:
-        url = entry.get('webpage_url') or entry.get('url')
-        if not url or url in seen_urls:
-            continue
-        seen_urls.add(url)
-
-        # Enrich if missing duration or title
-        if not entry.get('duration') or not entry.get('title'):
-            try:
-                with yt_dlp.YoutubeDL(enrich_opts) as ydl:
-                    detailed = ydl.extract_info(url, download=False)
-                    if detailed:
-                        if detailed.get('entries'):
-                            first = next((x for x in detailed.get('entries', []) if x), None)
-                            entry = first or detailed
-                        else:
-                            entry = detailed
-            except Exception:
-                continue
-
-        result = _score_spotify_candidate(track_title, track_artist, target_dur_s, entry, tolerance=2)
-        if result:
-            score, dur_diff = result
-            scored.append((score, dur_diff, entry))
-
-    task['progress'] = 35
-
-    if not scored:
+    if not matched:
         task['status'] = 'error'
         task['error'] = 'No matching song found'
-        task['message'] = f'No YouTube result matched "{track_title}" within ±2s duration.'
+        diffs_info = ', '.join([f"{r['title']}({abs(r['duration'] - target_dur_s)}s)" for r in search_results[:5]])
+        task['message'] = f'No result within ±2s of {target_dur_s}s. Closest: {diffs_info}'
         unreserve_download()
         return
 
-    scored.sort(key=lambda x: x[0], reverse=True)
-    best_score, best_diff, best_entry = scored[0]
-    best_url = best_entry.get('webpage_url') or best_entry.get('url')
-    print(f"[spotify-dl] Best match: \"{best_entry.get('title')}\" score={best_score:.3f} dur_diff={best_diff}s url={best_url}")
+    # Pick the one with the smallest duration difference (same as routes.ts line 276-281)
+    best_match = min(matched, key=lambda r: abs(r['duration'] - target_dur_s))
+    best_url = f"https://www.youtube.com/watch?v={best_match['id']}"
+    best_diff = abs(best_match['duration'] - target_dur_s)
 
-    task['progress'] = 40
-    task['message'] = f'Downloading: {best_entry.get("title", "track")}…'
+    print(f"[spotify-dl] Best match: \"{best_match['title']}\" ({best_match['duration']}s, diff: {best_diff}s)")
+
+    task['progress'] = 35
+    task['message'] = f'Downloading: {best_match["title"]}…'
 
     # ── Phase 3: Download best match as audio via proxies ──
     for proxy in shuffled:
@@ -1621,7 +1618,6 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
                     total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
                     downloaded = d.get('downloaded_bytes', 0)
                     if total > 0:
-                        # Map download progress to 40-90%
                         task['progress'] = min(40 + int(downloaded / total * 50), 90)
                     task['message'] = 'Downloading audio…'
                 elif d.get('status') == 'finished':
