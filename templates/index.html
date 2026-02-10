@@ -79,18 +79,21 @@
             margin-top: 10px;
             padding: 6px 16px;
             border-radius: 20px;
-            background: rgba(255,255,255,0.06);
-            border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
             font-size: 0.85rem;
             color: var(--text-secondary);
         }
+
         .downloads-remaining .dl-count {
             font-weight: 700;
             color: #6ee7b7;
         }
+
         .downloads-remaining.low .dl-count {
             color: #fbbf24;
         }
+
         .downloads-remaining.depleted .dl-count {
             color: #f87171;
         }
@@ -629,15 +632,29 @@
 
         /* Spinning animation for active step icon */
         @keyframes spin-slow {
-            from { transform: rotate(0deg); }
-            to   { transform: rotate(360deg); }
+            from {
+                transform: rotate(0deg);
+            }
+
+            to {
+                transform: rotate(360deg);
+            }
         }
+
         .dl-step.active .dl-step-icon {
             animation: pulse-glow 2s ease-in-out infinite;
         }
+
         @keyframes pulse-glow {
-            0%, 100% { box-shadow: 0 0 12px rgba(184, 212, 232, 0.2); }
-            50%      { box-shadow: 0 0 24px rgba(184, 212, 232, 0.5); }
+
+            0%,
+            100% {
+                box-shadow: 0 0 12px rgba(184, 212, 232, 0.2);
+            }
+
+            50% {
+                box-shadow: 0 0 24px rgba(184, 212, 232, 0.5);
+            }
         }
 
         .loader {
@@ -918,8 +935,14 @@
             <h1>Multi Downloader</h1>
             <p>Download from YouTube, TikTok, Facebook, Instagram & Spotify</p>
             <div class="downloads-remaining" id="dlRemaining">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                <span><span class="dl-count" id="dlCount">{{ downloads_remaining if downloads_remaining is defined else 100 }}</span> / 100 downloads remaining today</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                <span><span class="dl-count" id="dlCount">{{ downloads_remaining if downloads_remaining is defined else
+                        100 }}</span> / 100 downloads remaining today</span>
             </div>
         </div>
 
@@ -986,11 +1009,13 @@
 
         {% if video_info %}
         <div class="video-card">
-            <div class="thumbnail-container{% if platform_id in ['tiktok', 'instagram'] %} portrait{% endif %}{% if platform_id == 'spotify' %} spotify{% endif %}">
+            <div
+                class="thumbnail-container{% if platform_id in ['tiktok', 'instagram'] %} portrait{% endif %}{% if platform_id == 'spotify' %} spotify{% endif %}">
                 <img src="{{ video_info.thumbnail }}" alt="Thumbnail" loading="eager"
                     onerror="this.style.display='none'">
                 {% if video_info.duration_display or video_info.duration_string or video_info.duration %}
-                <span class="duration-badge">{{ video_info.duration_display or video_info.duration_string or video_info.duration }}</span>
+                <span class="duration-badge">{{ video_info.duration_display or video_info.duration_string or
+                    video_info.duration }}</span>
                 {% endif %}
             </div>
             <div class="video-info">
@@ -1034,24 +1059,30 @@
                     <div class="download-section">
                         <div class="download-section-title">📹 Video Download</div>
                         <div class="download-btn-group">
-                            <a href="#" onclick="startDownload('video','best'); return false;" class="btn-small btn-video">
+                            <a href="#" onclick="startDownload('video','best'); return false;"
+                                class="btn-small btn-video">
                                 Highest Quality
-                                <span class="quality-label" id="bestQuality">{{ video_info.best_quality_label or 'HD' }}</span>
+                                <span class="quality-label" id="bestQuality">{{ video_info.best_quality_label or 'HD'
+                                    }}</span>
                             </a>
-                            <a href="#" onclick="startDownload('video','worst'); return false;" class="btn-small btn-video">
+                            <a href="#" onclick="startDownload('video','worst'); return false;"
+                                class="btn-small btn-video">
                                 Lowest Quality
-                                <span class="quality-label" id="worstQuality">{{ video_info.worst_quality_label or 'SD' }}</span>
+                                <span class="quality-label" id="worstQuality">{{ video_info.worst_quality_label or 'SD'
+                                    }}</span>
                             </a>
                         </div>
                     </div>
                     <div class="download-section">
                         <div class="download-section-title">🎵 Audio Download</div>
                         <div class="download-btn-group">
-                            <a href="#" onclick="startDownload('audio','best','mp3'); return false;" class="btn-small btn-audio">
+                            <a href="#" onclick="startDownload('audio','best','mp3'); return false;"
+                                class="btn-small btn-audio">
                                 MP3 Format
                                 <span class="quality-label">.mp3</span>
                             </a>
-                            <a href="#" onclick="startDownload('audio','best','wav'); return false;" class="btn-small btn-audio">
+                            <a href="#" onclick="startDownload('audio','best','wav'); return false;"
+                                class="btn-small btn-audio">
                                 WAV Format
                                 <span class="quality-label">.wav</span>
                             </a>
@@ -1075,26 +1106,26 @@
                 submitBtn.disabled = true;
             });
 
-            {% if video_info %}
-            // Play a short, soft success tone when info is fetched.
-            try {
-                const ctx = new (window.AudioContext || window.webkitAudioContext)();
-                const osc = ctx.createOscillator();
-                const gain = ctx.createGain();
-                osc.type = 'sine';
-                osc.frequency.value = 523.25; // C5
-                gain.gain.value = 0.05;
-                osc.connect(gain);
-                gain.connect(ctx.destination);
-                osc.start();
-                osc.stop(ctx.currentTime + 0.18);
-                osc.onended = function () {
-                    ctx.close();
-                };
-            } catch (e) {
-                // Ignore audio errors (e.g., blocked by browser policy).
+            if (document.querySelector('.video-card')) {
+                // Play a short, soft success tone when info is fetched.
+                try {
+                    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.value = 523.25; // C5
+                    gain.gain.value = 0.05;
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.18);
+                    osc.onended = function () {
+                        ctx.close();
+                    };
+                } catch (e) {
+                    // Ignore audio errors (e.g., blocked by browser policy).
+                }
             }
-            {% endif %}
         });
 
         /* -------- Download Progress System -------- */
@@ -1102,27 +1133,27 @@
 
         function updateDlCounter() {
             fetch('/downloads_remaining')
-            .then(function (r) { return r.json(); })
-            .then(function (d) {
-                var el = document.getElementById('dlCount');
-                var wrap = document.getElementById('dlRemaining');
-                if (!el) return;
-                el.textContent = d.remaining;
-                wrap.classList.remove('low', 'depleted');
-                if (d.remaining <= 0) wrap.classList.add('depleted');
-                else if (d.remaining <= 20) wrap.classList.add('low');
-            })
-            .catch(function () {});
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    var el = document.getElementById('dlCount');
+                    var wrap = document.getElementById('dlRemaining');
+                    if (!el) return;
+                    el.textContent = d.remaining;
+                    wrap.classList.remove('low', 'depleted');
+                    if (d.remaining <= 0) wrap.classList.add('depleted');
+                    else if (d.remaining <= 20) wrap.classList.add('low');
+                })
+                .catch(function () { });
         }
 
         function startDownload(type, quality, fmt) {
-            var overlay  = document.getElementById('dlProgressOverlay');
-            var bar      = document.getElementById('dlBar');
-            var percent  = document.getElementById('dlPercent');
-            var msg      = document.getElementById('dlMsg');
-            var title    = document.getElementById('dlTitle');
-            var stepDl   = document.getElementById('stepDownload');
-            var stepMrg  = document.getElementById('stepMerge');
+            var overlay = document.getElementById('dlProgressOverlay');
+            var bar = document.getElementById('dlBar');
+            var percent = document.getElementById('dlPercent');
+            var msg = document.getElementById('dlMsg');
+            var title = document.getElementById('dlTitle');
+            var stepDl = document.getElementById('stepDownload');
+            var stepMrg = document.getElementById('stepMerge');
             var stepDone = document.getElementById('stepDone');
             var stepDlSub = document.getElementById('stepDownloadSub');
             var stepMrgSub = document.getElementById('stepMergeSub');
@@ -1160,82 +1191,82 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body)
             })
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                if (data.error) {
-                    msg.textContent = data.error;
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (data.error) {
+                        msg.textContent = data.error;
+                        msg.classList.add('dl-progress-error');
+                        setTimeout(function () { overlay.classList.remove('active'); }, 3000);
+                        updateDlCounter();
+                        return;
+                    }
+                    updateDlCounter();
+                    pollProgress(data.task_id);
+                })
+                .catch(function (err) {
+                    msg.textContent = 'Failed to start download.';
                     msg.classList.add('dl-progress-error');
                     setTimeout(function () { overlay.classList.remove('active'); }, 3000);
-                    updateDlCounter();
-                    return;
-                }
-                updateDlCounter();
-                pollProgress(data.task_id);
-            })
-            .catch(function (err) {
-                msg.textContent = 'Failed to start download.';
-                msg.classList.add('dl-progress-error');
-                setTimeout(function () { overlay.classList.remove('active'); }, 3000);
-            });
+                });
         }
 
         function pollProgress(taskId) {
-            var overlay  = document.getElementById('dlProgressOverlay');
-            var bar      = document.getElementById('dlBar');
-            var percent  = document.getElementById('dlPercent');
-            var msg      = document.getElementById('dlMsg');
-            var stepDl   = document.getElementById('stepDownload');
-            var stepMrg  = document.getElementById('stepMerge');
+            var overlay = document.getElementById('dlProgressOverlay');
+            var bar = document.getElementById('dlBar');
+            var percent = document.getElementById('dlPercent');
+            var msg = document.getElementById('dlMsg');
+            var stepDl = document.getElementById('stepDownload');
+            var stepMrg = document.getElementById('stepMerge');
             var stepDone = document.getElementById('stepDone');
 
             var timer = setInterval(function () {
                 fetch('/download_progress/' + taskId)
-                .then(function (r) { return r.json(); })
-                .then(function (data) {
-                    var pct = data.progress || 0;
-                    bar.style.width = pct + '%';
-                    percent.textContent = pct + '%';
-                    msg.textContent = data.message || '';
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        var pct = data.progress || 0;
+                        bar.style.width = pct + '%';
+                        percent.textContent = pct + '%';
+                        msg.textContent = data.message || '';
 
-                    if (data.status === 'downloading') {
-                        stepDl.className = 'dl-step active';
-                        stepMrg.className = 'dl-step';
-                        stepDone.className = 'dl-step';
-                    } else if (data.status === 'merging') {
-                        stepDl.className = 'dl-step completed';
-                        stepMrg.className = 'dl-step active';
-                        stepDone.className = 'dl-step';
-                    } else if (data.status === 'done' || data.status === 'served') {
-                        clearInterval(timer);
-                        bar.style.width = '100%';
-                        percent.textContent = '100%';
-                        stepDl.className = 'dl-step completed';
-                        stepMrg.className = 'dl-step completed';
-                        stepDone.className = 'dl-step active';
-                        msg.textContent = 'Starting download…';
+                        if (data.status === 'downloading') {
+                            stepDl.className = 'dl-step active';
+                            stepMrg.className = 'dl-step';
+                            stepDone.className = 'dl-step';
+                        } else if (data.status === 'merging') {
+                            stepDl.className = 'dl-step completed';
+                            stepMrg.className = 'dl-step active';
+                            stepDone.className = 'dl-step';
+                        } else if (data.status === 'done' || data.status === 'served') {
+                            clearInterval(timer);
+                            bar.style.width = '100%';
+                            percent.textContent = '100%';
+                            stepDl.className = 'dl-step completed';
+                            stepMrg.className = 'dl-step completed';
+                            stepDone.className = 'dl-step active';
+                            msg.textContent = 'Starting download…';
 
-                        // Use a hidden link for reliable large-file downloads
-                        setTimeout(function () {
-                            var a = document.createElement('a');
-                            a.href = '/download_file/' + taskId;
-                            a.style.display = 'none';
-                            document.body.appendChild(a);
-                            a.click();
-                            document.body.removeChild(a);
+                            // Use a hidden link for reliable large-file downloads
                             setTimeout(function () {
-                                overlay.classList.remove('active');
-                            }, 2000);
-                        }, 800);
-                    } else if (data.status === 'error') {
-                        clearInterval(timer);
-                        msg.textContent = data.message || 'Download failed.';
-                        msg.classList.add('dl-progress-error');
-                        setTimeout(function () { overlay.classList.remove('active'); }, 4000);
-                    }
-                })
-                .catch(function () {
-                    // network hiccup, keep polling
-                });
+                                var a = document.createElement('a');
+                                a.href = '/download_file/' + taskId;
+                                a.style.display = 'none';
+                                document.body.appendChild(a);
+                                a.click();
+                                document.body.removeChild(a);
+                                setTimeout(function () {
+                                    overlay.classList.remove('active');
+                                }, 2000);
+                            }, 800);
+                        } else if (data.status === 'error') {
+                            clearInterval(timer);
+                            msg.textContent = data.message || 'Download failed.';
+                            msg.classList.add('dl-progress-error');
+                            setTimeout(function () { overlay.classList.remove('active'); }, 4000);
+                        }
+                    })
+                    .catch(function () {
+                        // network hiccup, keep polling
+                    });
             }, 600);
         }
     </script>

@@ -1135,6 +1135,12 @@ def index():
                 best_label, worst_label = _get_quality_labels(info.get('formats', []))
                 info['best_quality_label'] = best_label
                 info['worst_quality_label'] = worst_label
+
+                # Ensure every non-Spotify platform has a formatted duration (mm:ss)
+                if not info.get('duration_display'):
+                    duration_display = _format_duration_seconds(info.get('duration'))
+                    if duration_display:
+                        info['duration_display'] = duration_display
             
             return render_template('index.html', 
                                    video_info=info, 
