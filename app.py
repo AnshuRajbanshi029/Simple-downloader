@@ -606,6 +606,18 @@ def _extract_spotify_track_id(track_url):
     return None
 
 
+def _extract_spotify_item(track_url):
+    """Return (kind, id) for track/artist/album/playlist URLs or URIs."""
+    match = re.search(r"spotify\.com/(track|artist|album|playlist)/([a-zA-Z0-9]+)", track_url)
+    if match:
+        return match.group(1), match.group(2)
+    if track_url.startswith("spotify:"):
+        parts = track_url.split(":")
+        if len(parts) >= 3 and parts[1] in ("track", "artist", "album", "playlist"):
+            return parts[1], parts[2]
+    return None, None
+
+
 def get_spotify_app_token():
     """Get and cache Spotify app token using Client Credentials flow."""
     now = int(time.time())
@@ -802,6 +814,13 @@ def _format_duration_seconds(seconds):
     return f"{minutes:02d}:{secs:02d}"
 
 
+def _upgrade_spotify_image(url):
+    """Try to upgrade Spotify image URL to a higher-res variant."""
+    if not url:
+        return url
+    return re.sub(r"(ab67616d0000)[0-9a-f]{4}", r"\1b273", url)
+
+
 def get_spotify_metadata(track_url):
     """
     Get Spotify track metadata using ScrapingBee + oEmbed.
@@ -819,12 +838,42 @@ def get_spotify_metadata(track_url):
         "platform": "spotify"
     }
     
-    # Extract track ID
-    track_id_match = re.search(r'track/([a-zA-Z0-9]+)', track_url)
-    if not track_id_match:
+    # Extract item kind + ID
+    kind, item_id = _extract_spotify_item(track_url)
+    if not kind or not item_id:
         return result
-    track_id = track_id_match.group(1)
-    
+
+    result["spotify_type"] = kind
+
+    # Non-track items: use oEmbed for reliable metadata
+    if kind != "track":
+        try:
+            oembed_url = f"https://open.spotify.com/oembed?url={track_url}"
+            resp = requests.get(oembed_url, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                result["thumbnail"] = data.get("thumbnail_url")
+                title = data.get("title", "")
+                author = data.get("author_name", "")
+                if kind == "artist":
+                    result["title"] = title or author or "Unknown Artist"
+                    result["uploader"] = result["title"]
+                else:
+                    result["title"] = title or "Unknown"
+                    result["uploader"] = author or "Unknown Artist"
+                result["artist_image"] = result["thumbnail"]
+        except Exception as e:
+            print(f"Spotify oEmbed Error: {e}")
+
+        # Ensure defaults for non-track items
+        result["title"] = result["title"] or "Unknown"
+        result["uploader"] = result["uploader"] or "Unknown"
+        result["artist_image"] = result["artist_image"] or result["thumbnail"]
+        result["thumbnail"] = _upgrade_spotify_image(result["thumbnail"])
+        result["artist_image"] = _upgrade_spotify_image(result["artist_image"])
+        return result
+
+    track_id = item_id
     artist_id = None  # Will extract from track data
     
     # APPROACH 1: Scrape embed page via ScrapingBee (has all metadata including duration)
@@ -959,6 +1008,9 @@ def get_spotify_metadata(track_url):
     # Use album art as fallback for artist image
     if not result["artist_image"]:
         result["artist_image"] = result["thumbnail"]
+
+    result["thumbnail"] = _upgrade_spotify_image(result["thumbnail"])
+    result["artist_image"] = _upgrade_spotify_image(result["artist_image"])
     
     return result
 

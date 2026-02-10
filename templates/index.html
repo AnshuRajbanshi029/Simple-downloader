@@ -297,12 +297,21 @@
             margin: 0 auto;
         }
 
+        .thumbnail-container.spotify {
+            aspect-ratio: 1/1;
+        }
+
         .thumbnail-container img {
             width: 100%;
             height: 100%;
             object-fit: cover;
             image-rendering: -webkit-optimize-contrast;
             image-rendering: crisp-edges;
+        }
+
+        .thumbnail-container.spotify img {
+            object-fit: contain;
+            image-rendering: auto;
         }
 
         .duration-badge {
@@ -977,7 +986,7 @@
 
         {% if video_info %}
         <div class="video-card">
-            <div class="thumbnail-container{% if platform_id in ['tiktok', 'instagram'] %} portrait{% endif %}">
+            <div class="thumbnail-container{% if platform_id in ['tiktok', 'instagram'] %} portrait{% endif %}{% if platform_id == 'spotify' %} spotify{% endif %}">
                 <img src="{{ video_info.thumbnail }}" alt="Thumbnail" loading="eager"
                     onerror="this.style.display='none'">
                 {% if video_info.duration_display or video_info.duration_string or video_info.duration %}
