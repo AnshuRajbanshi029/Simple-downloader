@@ -569,6 +569,9 @@ def extract_video_info(video_url):
                 'proxy': f"http://{proxy}",
                 'quiet': True,
                 'no_warnings': True,
+                'noplaylist': True,
+                'socket_timeout': 20,
+                'extractor_args': {'youtube': {'player_client': ['ios,web']}},
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(video_url, download=False)
@@ -1167,7 +1170,10 @@ def _run_video_download(task, video_url, quality, proxies):
                 'no_warnings': True,
                 'outtmpl': output_template,
                 'restrictfilenames': True,
+                'noplaylist': True,
+                'socket_timeout': 30,
                 'concurrent_fragment_downloads': 8,
+                'extractor_args': {'youtube': {'player_client': ['ios,web']}},
                 'progress_hooks': [_progress_hook],
                 'postprocessor_hooks': [_postprocessor_hook],
             }
@@ -1251,7 +1257,10 @@ def _run_audio_download(task, video_url, audio_format, proxies):
                 'no_warnings': True,
                 'outtmpl': output_template,
                 'restrictfilenames': True,
+                'noplaylist': True,
+                'socket_timeout': 30,
                 'concurrent_fragment_downloads': 8,
+                'extractor_args': {'youtube': {'player_client': ['ios,web']}},
                 'progress_hooks': [_progress_hook],
                 'postprocessor_hooks': [_postprocessor_hook],
             }
