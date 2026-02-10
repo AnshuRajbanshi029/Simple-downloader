@@ -382,6 +382,19 @@ def _video_mime_from_ext(ext):
     return 'video/mp4'
 
 
+def _format_duration_seconds(seconds):
+    """Format seconds as mm:ss with leading zeros (e.g., 00:07)."""
+    if seconds is None:
+        return None
+    try:
+        total = int(seconds)
+    except (TypeError, ValueError):
+        return None
+    minutes = total // 60
+    secs = total % 60
+    return f"{minutes:02d}:{secs:02d}"
+
+
 def get_spotify_metadata(track_url):
     """
     Get Spotify track metadata using ScrapingBee + oEmbed.
@@ -569,6 +582,11 @@ def index():
                 )
                 if avatar:
                     info['artist_image'] = avatar
+
+            if platform_id == 'tiktok':
+                duration_display = _format_duration_seconds(info.get('duration'))
+                if duration_display:
+                    info['duration_display'] = duration_display
 
             if platform_id != 'spotify':
                 best_label, worst_label = _get_quality_labels(info.get('formats', []))

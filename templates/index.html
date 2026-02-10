@@ -953,8 +953,8 @@
             <div class="thumbnail-container{% if platform_id == 'tiktok' %} portrait{% endif %}">
                 <img src="{{ video_info.thumbnail }}" alt="Thumbnail" loading="eager"
                     onerror="this.style.display='none'">
-                {% if video_info.duration_string or video_info.duration %}
-                <span class="duration-badge">{{ video_info.duration_string or video_info.duration }}</span>
+                {% if video_info.duration_display or video_info.duration_string or video_info.duration %}
+                <span class="duration-badge">{{ video_info.duration_display or video_info.duration_string or video_info.duration }}</span>
                 {% endif %}
             </div>
             <div class="video-info">
