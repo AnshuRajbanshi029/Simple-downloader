@@ -220,6 +220,17 @@ def _clean_instagram_url(url):
             .replace('\\u0026', '&'))
 
 
+def _clean_image_url(url):
+    if not url:
+        return None
+    return (url
+            .replace('&amp;', '&')
+            .replace('\\u002F', '/')
+            .replace('\\/', '/')
+            .replace('\\u003D', '=')
+            .replace('\\u0026', '&'))
+
+
 def _pick_best_thumbnail(thumbnails):
     if not thumbnails:
         return None
@@ -281,6 +292,39 @@ def get_instagram_user_avatar(user_id):
             continue
 
     return None
+
+
+def get_facebook_profile_avatar(profile_url):
+    if not profile_url:
+        return None
+
+    html = _fetch_html_with_proxies(profile_url) or _fetch_html(profile_url)
+    if not html:
+        return None
+
+    # Facebook pages usually expose the profile pic via og:image.
+    og_image = _extract_meta_content(html, 'og:image')
+    if og_image:
+        return _clean_image_url(og_image)
+
+    patterns = [
+        r'"profilePicUrl"\s*:\s*"([^"]+)"',
+        r'"profile_pic_url"\s*:\s*"([^"]+)"',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, html)
+        if match:
+            return _clean_image_url(match.group(1))
+
+    return None
+
+
+def _should_proxy_image(url):
+    if not url:
+        return False
+    from urllib.parse import urlparse
+    host = urlparse(url).hostname or ''
+    return host.endswith('.cdninstagram.com') or host.endswith('.fbcdn.net')
 
 
 def extract_video_info(video_url):
@@ -733,6 +777,39 @@ def index():
                 if duration_display:
                     info['duration_display'] = duration_display
 
+            if platform_id == 'facebook':
+                if not info.get('artist_image'):
+                    avatar = (
+                        info.get('uploader_avatar')
+                        or info.get('uploader_avatar_url')
+                        or info.get('uploader_thumbnail')
+                        or info.get('avatar')
+                    )
+                    if not avatar:
+                        profile_url = info.get('uploader_url') or info.get('channel_url')
+                        if not profile_url:
+                            webpage_url = info.get('webpage_url')
+                            if webpage_url:
+                                match = re.search(r'facebook\.com/([^/?]+)', webpage_url)
+                                if match:
+                                    slug = match.group(1)
+                                    if slug not in {'watch', 'reel', 'videos', 'story.php'}:
+                                        profile_url = f"https://www.facebook.com/{slug}"
+                        avatar = get_facebook_profile_avatar(profile_url)
+
+                    if avatar:
+                        info['artist_image'] = avatar
+
+                duration_display = _format_duration_seconds(info.get('duration'))
+                if duration_display:
+                    info['duration_display'] = duration_display
+
+                if info.get('artist_image') and _should_proxy_image(info['artist_image']):
+                    from urllib.parse import quote as _url_quote
+                    info['artist_image'] = (
+                        '/proxy_image?url=' + _url_quote(info['artist_image'], safe='')
+                    )
+
             if platform_id == 'instagram':
                 if not info.get('thumbnail'):
                     info['thumbnail'] = _pick_best_thumbnail(info.get('thumbnails', []))
@@ -758,11 +835,11 @@ def index():
                 # Instagram CDN URLs can be geo-blocked or expire for
                 # direct browser requests, so we proxy them to be safe.
                 from urllib.parse import quote as _url_quote
-                if info.get('artist_image'):
+                if info.get('artist_image') and _should_proxy_image(info['artist_image']):
                     info['artist_image'] = (
                         '/proxy_image?url=' + _url_quote(info['artist_image'], safe='')
                     )
-                if info.get('thumbnail'):
+                if info.get('thumbnail') and _should_proxy_image(info['thumbnail']):
                     info['thumbnail'] = (
                         '/proxy_image?url=' + _url_quote(info['thumbnail'], safe='')
                     )
