@@ -3,13 +3,56 @@ import random
 import time
 import base64
 import re
-from flask import Flask, render_template, request, redirect, url_for, Response, stream_with_context
+import tempfile
+import shutil
+import threading
+import uuid
+from flask import Flask, render_template, request, redirect, url_for, Response, stream_with_context, jsonify
 
 import requests
 from bs4 import BeautifulSoup
 import yt_dlp
 
+# Check if ffmpeg is available for merging separate audio+video streams
+HAS_FFMPEG = shutil.which('ffmpeg') is not None
+
 app = Flask(__name__)
+
+# ── In-memory task tracker for download progress ──────────────────────────
+download_tasks = {}  # task_id -> task dict
+TASK_TTL = 600       # seconds to keep completed tasks before cleanup
+
+
+def _make_task():
+    """Create a fresh task dict and register it."""
+    task_id = uuid.uuid4().hex[:12]
+    task = {
+        'id': task_id,
+        'status': 'starting',     # starting | downloading | merging | done | error
+        'progress': 0,            # 0-100
+        'message': 'Preparing…',
+        'filename': None,
+        'filepath': None,
+        'tmpdir': None,
+        'mime_type': None,
+        'filesize': 0,
+        'error': None,
+        'created_at': time.time(),
+    }
+    download_tasks[task_id] = task
+    # Prune old tasks
+    now = time.time()
+    for tid in list(download_tasks):
+        if now - download_tasks[tid]['created_at'] > TASK_TTL:
+            _cleanup_task(tid)
+    return task
+
+
+def _cleanup_task(task_id):
+    """Remove task and its temp files."""
+    task = download_tasks.pop(task_id, None)
+    if task and task.get('tmpdir'):
+        shutil.rmtree(task['tmpdir'], ignore_errors=True)
 
 # Residential Proxies - rotates randomly for each request
 PROXIES = [
@@ -512,117 +555,291 @@ def index():
             
     return render_template('index.html', platforms=PLATFORMS)
 
+# ── Background download worker ───────────────────────────────────────────
+def _run_video_download(task, video_url, quality, proxies):
+    """Download video (+ merge audio) in a background thread."""
+    shuffled = proxies.copy()
+    random.shuffle(shuffled)
+
+    for proxy in shuffled:
+        tmpdir = tempfile.mkdtemp()
+        task['tmpdir'] = tmpdir
+        try:
+            if quality == 'worst':
+                if HAS_FFMPEG:
+                    fmt = ('worstvideo[ext=mp4]+worstaudio[ext=m4a]'
+                           '/worstvideo+worstaudio'
+                           '/worst[ext=mp4]/worst')
+                else:
+                    fmt = 'worst[ext=mp4]/worst'
+            else:
+                if HAS_FFMPEG:
+                    fmt = ('bestvideo[ext=mp4]+bestaudio[ext=m4a]'
+                           '/bestvideo+bestaudio'
+                           '/best[ext=mp4]/best')
+                else:
+                    fmt = 'best[ext=mp4]/best'
+
+            output_template = os.path.join(tmpdir, '%(title)s.%(ext)s')
+
+            def _progress_hook(d):
+                if d.get('status') == 'downloading':
+                    task['status'] = 'downloading'
+                    total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
+                    downloaded = d.get('downloaded_bytes', 0)
+                    if total > 0:
+                        task['progress'] = min(int(downloaded / total * 100), 100)
+                    task['message'] = 'Downloading video…'
+                elif d.get('status') == 'finished':
+                    task['progress'] = 100
+                    task['message'] = 'Download complete, processing…'
+
+            def _postprocessor_hook(d):
+                if d.get('status') == 'started':
+                    task['status'] = 'merging'
+                    task['progress'] = 100
+                    task['message'] = 'Merging video & audio…'
+                elif d.get('status') == 'finished':
+                    task['message'] = 'Merge complete!'
+
+            ydl_opts = {
+                'format': fmt,
+                'proxy': f"http://{proxy}",
+                'quiet': True,
+                'no_warnings': True,
+                'outtmpl': output_template,
+                'progress_hooks': [_progress_hook],
+                'postprocessor_hooks': [_postprocessor_hook],
+            }
+            if HAS_FFMPEG:
+                ydl_opts['merge_output_format'] = 'mp4'
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(video_url, download=True)
+                title = info.get('title', 'video')
+
+                downloaded_files = [
+                    f for f in os.listdir(tmpdir)
+                    if not f.endswith('.part') and not f.endswith('.ytdl')
+                ]
+                if not downloaded_files:
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+                    continue
+
+                filepath = os.path.join(tmpdir, downloaded_files[0])
+                ext = os.path.splitext(downloaded_files[0])[1].lstrip('.') or 'mp4'
+                safe_filename = re.sub(r'[^\w\-_.]', '_', title)[:100] + f'.{ext}'
+
+                task['filepath'] = filepath
+                task['filename'] = safe_filename
+                task['filesize'] = os.path.getsize(filepath)
+                task['mime_type'] = _video_mime_from_ext(ext)
+                task['status'] = 'done'
+                task['progress'] = 100
+                task['message'] = 'Ready to download!'
+                return
+
+        except Exception as e:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            continue
+
+    task['status'] = 'error'
+    task['error'] = 'All proxies failed'
+    task['message'] = 'Download failed — please try again.'
+
+
+def _run_audio_download(task, video_url, audio_format, proxies):
+    """Download + convert audio in a background thread."""
+    shuffled = proxies.copy()
+    random.shuffle(shuffled)
+
+    for proxy in shuffled:
+        tmpdir = tempfile.mkdtemp()
+        task['tmpdir'] = tmpdir
+        try:
+            ext = audio_format.lower()
+            output_template = os.path.join(tmpdir, '%(title)s.%(ext)s')
+
+            def _progress_hook(d):
+                if d.get('status') == 'downloading':
+                    task['status'] = 'downloading'
+                    total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
+                    downloaded = d.get('downloaded_bytes', 0)
+                    if total > 0:
+                        task['progress'] = min(int(downloaded / total * 100), 100)
+                    task['message'] = 'Downloading audio…'
+                elif d.get('status') == 'finished':
+                    task['progress'] = 100
+                    task['message'] = 'Download complete, converting…'
+
+            def _postprocessor_hook(d):
+                if d.get('status') == 'started':
+                    task['status'] = 'merging'
+                    task['progress'] = 100
+                    task['message'] = f'Converting to .{ext}…'
+                elif d.get('status') == 'finished':
+                    task['message'] = 'Conversion complete!'
+
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'proxy': f"http://{proxy}",
+                'quiet': True,
+                'no_warnings': True,
+                'outtmpl': output_template,
+                'progress_hooks': [_progress_hook],
+                'postprocessor_hooks': [_postprocessor_hook],
+            }
+            if HAS_FFMPEG:
+                ydl_opts['postprocessors'] = [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': ext,
+                    'preferredquality': '192',
+                }]
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(video_url, download=True)
+                title = info.get('title', 'audio')
+
+                downloaded_files = [
+                    f for f in os.listdir(tmpdir)
+                    if not f.endswith('.part') and not f.endswith('.ytdl')
+                ]
+                if not downloaded_files:
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+                    continue
+
+                filepath = os.path.join(tmpdir, downloaded_files[0])
+                actual_ext = os.path.splitext(downloaded_files[0])[1].lstrip('.') or ext
+                safe_filename = re.sub(r'[^\w\-_.]', '_', title)[:100] + f'.{actual_ext}'
+
+                mime_map = {
+                    'mp3': 'audio/mpeg',
+                    'wav': 'audio/wav',
+                    'm4a': 'audio/mp4',
+                    'opus': 'audio/opus',
+                    'webm': 'audio/webm',
+                    'ogg': 'audio/ogg',
+                }
+
+                task['filepath'] = filepath
+                task['filename'] = safe_filename
+                task['filesize'] = os.path.getsize(filepath)
+                task['mime_type'] = mime_map.get(actual_ext, f'audio/{actual_ext}')
+                task['status'] = 'done'
+                task['progress'] = 100
+                task['message'] = 'Ready to download!'
+                return
+
+        except Exception as e:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            continue
+
+    task['status'] = 'error'
+    task['error'] = 'All proxies failed'
+    task['message'] = 'Download failed — please try again.'
+
+
+# ── API routes for task-based downloads ────────────────────────────────────
+
+@app.route('/download_start', methods=['POST'])
+def download_start():
+    """Kick off a download in the background and return a task ID."""
+    data = request.get_json(force=True)
+    video_url = data.get('url')
+    dl_type = data.get('type', 'video')        # 'video' or 'audio'
+    quality = data.get('quality', 'best')       # 'best' or 'worst'
+    audio_format = data.get('format', 'mp3')    # 'mp3' or 'wav'
+
+    if not video_url:
+        return jsonify({'error': 'No URL provided'}), 400
+
+    task = _make_task()
+
+    if dl_type == 'audio':
+        t = threading.Thread(
+            target=_run_audio_download,
+            args=(task, video_url, audio_format, PROXIES),
+            daemon=True,
+        )
+    else:
+        t = threading.Thread(
+            target=_run_video_download,
+            args=(task, video_url, quality, PROXIES),
+            daemon=True,
+        )
+    t.start()
+
+    return jsonify({'task_id': task['id']})
+
+
+@app.route('/download_progress/<task_id>')
+def download_progress(task_id):
+    """Poll this to get live progress of a download task."""
+    task = download_tasks.get(task_id)
+    if not task:
+        return jsonify({'status': 'error', 'message': 'Task not found'}), 404
+    return jsonify({
+        'status': task['status'],
+        'progress': task['progress'],
+        'message': task['message'],
+    })
+
+
+@app.route('/download_file/<task_id>')
+def download_file(task_id):
+    """Serve the finished file and clean up."""
+    task = download_tasks.get(task_id)
+    if not task or task['status'] != 'done':
+        return 'File not ready', 404
+
+    filepath = task['filepath']
+    filesize = task['filesize']
+    filename = task['filename']
+    mime_type = task['mime_type']
+    tmpdir = task['tmpdir']
+
+    # Remove from tracker (temp dir cleaned after streaming)
+    download_tasks.pop(task_id, None)
+
+    def generate():
+        try:
+            with open(filepath, 'rb') as f:
+                while True:
+                    chunk = f.read(65536)
+                    if not chunk:
+                        break
+                    yield chunk
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    return Response(
+        stream_with_context(generate()),
+        headers={
+            'Content-Disposition': f'attachment; filename="{filename}"',
+            'Content-Type': mime_type,
+            'Content-Length': str(filesize),
+        }
+    )
+
+
+# Legacy direct-download routes (kept as fallbacks) ────────────────────────
+
 @app.route('/download')
 def download():
     video_url = request.args.get('url')
     quality = request.args.get('quality', 'best')
-    
     if not video_url:
         return redirect(url_for('index'))
-
-    try:
-        shuffled_proxies = PROXIES.copy()
-        random.shuffle(shuffled_proxies)
-
-        for proxy in shuffled_proxies:
-            try:
-                ydl_opts = {
-                    'proxy': f"http://{proxy}",
-                    'quiet': True,
-                    'no_warnings': True,
-                }
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(video_url, download=False)
-                    selected_format = _select_direct_video_format(info.get('formats', []), quality)
-                    if not selected_format:
-                        continue
-
-                    stream_url = selected_format.get('url')
-                    if not stream_url:
-                        continue
-
-                    title = info.get('title', 'video')
-                    ext = selected_format.get('ext') or 'mp4'
-                    
-                    # Stream the file with proper headers (through same proxy)
-                    proxy_url = f"http://{proxy}"
-                    
-                    def generate():
-                        with requests.get(stream_url, stream=True, timeout=30, proxies={'http': proxy_url, 'https': proxy_url}) as r:
-                            r.raise_for_status()
-                            for chunk in r.iter_content(chunk_size=8192):
-                                if chunk:
-                                    yield chunk
-                    
-                    safe_filename = re.sub(r'[^\w\-_.]', '_', title)[:100] + f'.{ext}'
-                    
-                    return Response(
-                        stream_with_context(generate()),
-                        headers={
-                            'Content-Disposition': f'attachment; filename="{safe_filename}"',
-                            'Content-Type': _video_mime_from_ext(ext),
-                        }
-                    )
-            except Exception:
-                continue
-        
-        return "Error: All proxies failed", 500
-    except Exception as e:
-        return f"Error: {e}", 500
+    # Redirect to index so JS flow is used instead
+    return redirect(url_for('index'))
 
 
 @app.route('/download_audio')
 def download_audio():
     video_url = request.args.get('url')
-    audio_format = request.args.get('format', 'mp3')
-    
     if not video_url:
         return redirect(url_for('index'))
-
-    try:
-        shuffled_proxies = PROXIES.copy()
-        random.shuffle(shuffled_proxies)
-        
-        for proxy in shuffled_proxies:
-            try:
-                ydl_opts = {
-                    'format': 'bestaudio/best',
-                    'proxy': f"http://{proxy}",
-                    'quiet': True,
-                    'no_warnings': True,
-                }
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(video_url, download=False)
-                    stream_url = info['url']
-                    title = info.get('title', 'audio')
-                    ext = audio_format.lower()
-                    
-                    # Stream the file with proper headers (through same proxy)
-                    proxy_url = f"http://{proxy}"
-                    
-                    def generate():
-                        with requests.get(stream_url, stream=True, timeout=30, proxies={'http': proxy_url, 'https': proxy_url}) as r:
-                            r.raise_for_status()
-                            for chunk in r.iter_content(chunk_size=8192):
-                                if chunk:
-                                    yield chunk
-                    
-                    safe_filename = re.sub(r'[^\w\-_.]', '_', title)[:100] + f'.{ext}'
-                    mime_type = 'audio/mpeg' if ext == 'mp3' else 'audio/wav'
-                    
-                    return Response(
-                        stream_with_context(generate()),
-                        headers={
-                            'Content-Disposition': f'attachment; filename="{safe_filename}"',
-                            'Content-Type': mime_type,
-                        }
-                    )
-            except Exception:
-                continue
-        
-        return "Error: All proxies failed", 500
-    except Exception as e:
-        return f"Error: {e}", 500
+    return redirect(url_for('index'))
 
 
 @app.route('/get_formats')
@@ -648,12 +865,15 @@ def get_formats():
                     info = ydl.extract_info(video_url, download=False)
                     formats = info.get('formats', [])
 
-                    # Match UI labels to the same direct streamable format logic as /download.
-                    best = _select_direct_video_format(formats, 'best')
-                    worst = _select_direct_video_format(formats, 'worst')
-                    if best or worst:
-                        best_height = (best or {}).get('height')
-                        worst_height = (worst or {}).get('height')
+                    # Show the actual best/worst resolution available
+                    # (including DASH/adaptive formats since we now merge them)
+                    video_fmts = [
+                        f for f in formats
+                        if f.get('vcodec') != 'none' and f.get('height')
+                    ]
+                    if video_fmts:
+                        best_height = max(f.get('height', 0) for f in video_fmts)
+                        worst_height = min(f.get('height', 0) for f in video_fmts)
                         return {
                             'best_quality': f"{best_height}p" if best_height else 'Best',
                             'worst_quality': f"{worst_height}p" if worst_height else 'Low',
