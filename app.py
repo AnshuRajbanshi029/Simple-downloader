@@ -210,6 +210,53 @@ def get_tiktok_profile_avatar(profile_url):
     return None
 
 
+def _clean_instagram_url(url):
+    if not url:
+        return None
+    return (url
+            .replace('\\u002F', '/')
+            .replace('\\/', '/')
+            .replace('\\u003D', '=')
+            .replace('\\u0026', '&'))
+
+
+def _pick_best_thumbnail(thumbnails):
+    if not thumbnails:
+        return None
+
+    def score(t):
+        width = t.get('width') or 0
+        height = t.get('height') or 0
+        return (width * height, width, height)
+
+    best = max(thumbnails, key=score)
+    return best.get('url') or best.get('src')
+
+
+def get_instagram_profile_avatar(profile_url):
+    if not profile_url:
+        return None
+
+    html = _fetch_html_with_proxies(profile_url) or _fetch_html(profile_url)
+    if not html:
+        return None
+
+    patterns = [
+        r'"profile_pic_url_hd"\s*:\s*"([^"]+)"',
+        r'"profile_pic_url"\s*:\s*"([^"]+)"',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, html)
+        if match:
+            return _clean_instagram_url(match.group(1))
+
+    og_image = _extract_meta_content(html, 'og:image')
+    if og_image:
+        return _clean_instagram_url(og_image)
+
+    return None
+
+
 def extract_video_info(video_url):
     """Try all proxies until one succeeds."""
     shuffled_proxies = PROXIES.copy()
@@ -656,6 +703,32 @@ def index():
                     info['artist_image'] = avatar
 
             if platform_id == 'tiktok':
+                duration_display = _format_duration_seconds(info.get('duration'))
+                if duration_display:
+                    info['duration_display'] = duration_display
+
+            if platform_id == 'instagram':
+                if not info.get('thumbnail'):
+                    info['thumbnail'] = _pick_best_thumbnail(info.get('thumbnails', []))
+
+                if not info.get('artist_image'):
+                    avatar = (
+                        info.get('uploader_avatar')
+                        or info.get('uploader_avatar_url')
+                        or info.get('uploader_thumbnail')
+                        or info.get('avatar')
+                    )
+                    if not avatar:
+                        profile_url = info.get('uploader_url')
+                        if not profile_url:
+                            uploader_id = info.get('uploader_id') or info.get('uploader')
+                            if uploader_id:
+                                profile_url = f"https://www.instagram.com/{uploader_id}/"
+                        avatar = get_instagram_profile_avatar(profile_url)
+
+                    if avatar:
+                        info['artist_image'] = avatar
+
                 duration_display = _format_duration_seconds(info.get('duration'))
                 if duration_display:
                     info['duration_display'] = duration_display
