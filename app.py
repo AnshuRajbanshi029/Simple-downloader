@@ -1301,18 +1301,20 @@ def _run_video_download(task, video_url, quality, proxies):
         try:
             if quality == 'worst':
                 if HAS_FFMPEG:
-                    fmt = ('worstvideo[ext=mp4]+worstaudio[ext=m4a]'
+                    fmt = ('worstvideo[ext=mp4][vcodec^=avc]+worstaudio[ext=m4a]'
+                           '/worstvideo[ext=mp4]+worstaudio[ext=m4a]'
                            '/worstvideo+worstaudio'
                            '/worst[ext=mp4]/worst')
                 else:
-                    fmt = 'worst[ext=mp4]/worst'
+                    fmt = 'worst[ext=mp4][vcodec^=avc]/worst[ext=mp4]/worst'
             else:
                 if HAS_FFMPEG:
-                    fmt = ('bestvideo[ext=mp4]+bestaudio[ext=m4a]'
+                    fmt = ('bestvideo[ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]'
+                           '/bestvideo[ext=mp4]+bestaudio[ext=m4a]'
                            '/bestvideo+bestaudio'
                            '/best[ext=mp4]/best')
                 else:
-                    fmt = 'best[ext=mp4]/best'
+                    fmt = 'best[ext=mp4][vcodec^=avc]/best[ext=mp4]/best'
 
             output_template = os.path.join(tmpdir, '%(id)s.%(ext)s')
 
