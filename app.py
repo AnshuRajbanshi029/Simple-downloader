@@ -363,7 +363,7 @@ def _pick_best_thumbnail(thumbnails):
 
 
 def get_instagram_user_avatar(user_id):
-    """Fetch an Instagram user's profile picture via the internal mobile API."""
+    """Fetch an Instagram user's profile picture via the internal mobile API, rotating on 402."""
     if not user_id:
         return None
 
@@ -377,32 +377,43 @@ def get_instagram_user_avatar(user_id):
         "X-IG-App-ID": "936619743392459",
     }
 
-    shuffled = get_current_proxies()
-    random.shuffle(shuffled)
+    for attempt in range(2):
+        shuffled = get_current_proxies()
+        random.shuffle(shuffled)
+        all_402 = True
 
-    for proxy in shuffled[:4]:                       # try up to 4 proxies
-        try:
-            proxy_url = f"http://{proxy}"
-            resp = requests.get(
-                api_url,
-                headers=ig_headers,
-                proxies={"http": proxy_url, "https": proxy_url},
-                timeout=10,
-            )
-            if resp.status_code != 200:
+        for proxy in shuffled[:4]:                       # try up to 4 proxies
+            try:
+                proxy_url = f"http://{proxy}"
+                resp = requests.get(
+                    api_url,
+                    headers=ig_headers,
+                    proxies={"http": proxy_url, "https": proxy_url},
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    user = resp.json().get("user", {})
+                    # Prefer HD, fall back to standard
+                    hd = user.get("hd_profile_pic_url_info", {})
+                    pic = (
+                        hd.get("url")
+                        or user.get("profile_pic_url_hd")
+                        or user.get("profile_pic_url")
+                    )
+                    if pic:
+                        return pic
+                
+                if resp.status_code != 402:
+                    all_402 = False
+            except Exception as e:
+                if "402" not in str(e):
+                    all_402 = False
                 continue
-            user = resp.json().get("user", {})
-            # Prefer HD, fall back to standard
-            hd = user.get("hd_profile_pic_url_info", {})
-            pic = (
-                hd.get("url")
-                or user.get("profile_pic_url_hd")
-                or user.get("profile_pic_url")
-            )
-            if pic:
-                return pic
-        except Exception:
-            continue
+        
+        if all_402:
+            rotate_proxy_group()
+        else:
+            break
 
     return None
 
