@@ -135,19 +135,42 @@ def unreserve_download():
             _save_download_log(log)
 
 
-# Residential Proxies - rotates randomly for each request
-PROXIES = [
-    "ppdyrflk:jgnyfq1ajlik@31.59.20.176:6754",
-    "ppdyrflk:jgnyfq1ajlik@23.95.150.145:6114",
-    "ppdyrflk:jgnyfq1ajlik@198.23.239.134:6540",
-    "ppdyrflk:jgnyfq1ajlik@45.38.107.97:6014",
-    "ppdyrflk:jgnyfq1ajlik@107.172.163.27:6543",
-    "ppdyrflk:jgnyfq1ajlik@198.105.121.200:6462",
-    "ppdyrflk:jgnyfq1ajlik@64.137.96.74:6641",
-    "ppdyrflk:jgnyfq1ajlik@216.10.27.159:6837",
-    "ppdyrflk:jgnyfq1ajlik@23.26.71.145:5628",
-    "ppdyrflk:jgnyfq1ajlik@23.229.19.94:8689",
-]
+# ── Proxy Rotation Logic (for 402 Payment Required errors) ──────────────────
+PROXY_FILES = [".txt1", ".txt2", ".txt3", ".txt4"]
+_proxy_file_lock = threading.Lock()
+_current_proxy_index = 0
+
+def _load_proxies_from_file(file_name):
+    """Load proxy strings from a text file in the app directory."""
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(base_dir, file_name)
+        if os.path.exists(path):
+            with open(path, 'r', encoding='utf-8') as f:
+                return [line.strip() for line in f if line.strip()]
+    except Exception as e:
+        print(f"Error loading {file_name}: {e}")
+    return []
+
+def get_current_proxies():
+    """Returns the list of proxies from the current active .txtN file."""
+    with _proxy_file_lock:
+        return _load_proxies_from_file(PROXY_FILES[_current_proxy_index])
+
+def rotate_proxy_group():
+    """Switches to the next proxy text file group."""
+    global _current_proxy_index, PROXIES
+    with _proxy_file_lock:
+        _current_proxy_index = (_current_proxy_index + 1) % len(PROXY_FILES)
+        next_file = PROXY_FILES[_current_proxy_index]
+        print(f"Rotating to proxy group: {next_file}")
+        new_proxies = _load_proxies_from_file(next_file)
+        if new_proxies:
+            PROXIES = new_proxies
+        return PROXIES
+
+# Initial proxy list for global use (backwards compatibility)
+PROXIES = get_current_proxies()
 
 # Platform detection (video platforms only)
 PLATFORMS = {
@@ -240,22 +263,36 @@ def _fetch_html_with_proxies(url):
         "Accept-Language": "en-US,en;q=0.9",
         "Referer": "https://www.google.com/"
     }
-    shuffled_proxies = PROXIES.copy()
-    random.shuffle(shuffled_proxies)
+    
+    # Try current group, rotate if needed
+    for attempt in range(2):
+        shuffled_proxies = get_current_proxies()
+        random.shuffle(shuffled_proxies)
+        all_402 = True
 
-    for proxy in shuffled_proxies:
-        try:
-            proxy_url = f"http://{proxy}"
-            response = requests.get(
-                url,
-                headers=headers,
-                proxies={'http': proxy_url, 'https': proxy_url},
-                timeout=15
-            )
-            if response.status_code == 200:
-                return response.text
-        except Exception:
-            continue
+        for proxy in shuffled_proxies:
+            try:
+                proxy_url = f"http://{proxy}"
+                response = requests.get(
+                    url,
+                    headers=headers,
+                    proxies={'http': proxy_url, 'https': proxy_url},
+                    timeout=15
+                )
+                if response.status_code == 200:
+                    return response.text
+                if response.status_code != 402:
+                    all_402 = False
+            except Exception as e:
+                if "402" not in str(e):
+                    all_402 = False
+                continue
+        
+        if all_402:
+            rotate_proxy_group()
+        else:
+            break # Stop if it's not a general group failure
+            
     return None
 
 
@@ -326,12 +363,7 @@ def _pick_best_thumbnail(thumbnails):
 
 
 def get_instagram_user_avatar(user_id):
-    """Fetch an Instagram user's profile picture via the internal mobile API.
-
-    ``user_id`` is the numeric ID that yt_dlp returns as ``uploader_id``.
-    The ``i.instagram.com`` endpoint works without authentication when called
-    through our proxies with an Android user-agent.
-    """
+    """Fetch an Instagram user's profile picture via the internal mobile API."""
     if not user_id:
         return None
 
@@ -345,7 +377,7 @@ def get_instagram_user_avatar(user_id):
         "X-IG-App-ID": "936619743392459",
     }
 
-    shuffled = PROXIES.copy()
+    shuffled = get_current_proxies()
     random.shuffle(shuffled)
 
     for proxy in shuffled[:4]:                       # try up to 4 proxies
@@ -563,38 +595,51 @@ def _should_proxy_image(url):
 
 
 def extract_video_info(video_url):
-    """Try all proxies until one succeeds."""
-    shuffled_proxies = PROXIES.copy()
-    random.shuffle(shuffled_proxies)
-    
+    """Try all proxies until one succeeds, rotating groups on 402 errors."""
     last_error = None
-    for proxy in shuffled_proxies:
-        try:
-            ydl_opts = {
-                'format': 'best',
-                'proxy': f"http://{proxy}",
-                'quiet': True,
-                'no_warnings': True,
-                'noplaylist': True,
-                'socket_timeout': 20,
-                'extractor_args': {'youtube': {'player_client': ['ios,web']}},
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(video_url, download=False)
-                
-                # Try to get channel avatar for YouTube videos
-                channel_id = info.get('channel_id')
-                if channel_id and not info.get('artist_image'):
-                    avatar = get_youtube_channel_avatar(channel_id)
-                    if avatar:
-                        info['artist_image'] = avatar
-                
-                return info  # Success!
-        except Exception as e:
-            last_error = e
-            continue  # Try next proxy
     
-    # All proxies failed
+    for attempt in range(2):
+        shuffled_proxies = get_current_proxies()
+        random.shuffle(shuffled_proxies)
+        all_402 = True
+        
+        for proxy in shuffled_proxies:
+            try:
+                ydl_opts = {
+                    'format': 'best',
+                    'proxy': f"http://{proxy}",
+                    'quiet': True,
+                    'no_warnings': True,
+                    'noplaylist': True,
+                    'socket_timeout': 20,
+                    'extractor_args': {'youtube': {'player_client': ['ios,web']}},
+                }
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(video_url, download=False)
+                    
+                    # Try to get channel avatar for YouTube videos
+                    channel_id = info.get('channel_id')
+                    if channel_id and not info.get('artist_image'):
+                        avatar = get_youtube_channel_avatar(channel_id)
+                        if avatar:
+                            info['artist_image'] = avatar
+                    
+                    return info  # Success!
+            except Exception as e:
+                last_error = e
+                # Check for "402 Payment Required" in the error message
+                if "402 Payment Required" not in str(e):
+                    all_402 = False
+                continue
+        
+        # If all 10 proxies in the group failed with 402, rotate group and retry once
+        if all_402:
+            print("All proxies in current group failed with 402 Payment Required. Rotating group...")
+            rotate_proxy_group()
+        else:
+            break # Not a group-wide 402 failure, stop retrying groups
+    
+    # All attempts failed
     raise last_error if last_error else Exception("All proxies failed")
 
 spotify_token_cache = {
@@ -1290,415 +1335,379 @@ def api_resolve():
         return jsonify({'error': str(e)}), 500
 
 # ── Background download worker ───────────────────────────────────────────
-def _run_video_download(task, video_url, quality, proxies):
-    """Download video (+ merge audio) in a background thread."""
-    shuffled = proxies.copy()
-    random.shuffle(shuffled)
+def _run_video_download(task, video_url, quality, proxies=None):
+    """Download video (+ merge audio) in a background thread, rotating on 402."""
+    last_error = None
+    
+    for attempt in range(2):
+        shuffled = PROXIES.copy()
+        random.shuffle(shuffled)
+        all_402 = True
 
-    for proxy in shuffled:
-        tmpdir = tempfile.mkdtemp()
-        task['tmpdir'] = tmpdir
-        try:
-            if quality == 'worst':
-                if HAS_FFMPEG:
-                    fmt = ('worstvideo[ext=mp4][vcodec^=avc]+worstaudio[ext=m4a]'
-                           '/worstvideo[ext=mp4]+worstaudio[ext=m4a]'
-                           '/worstvideo+worstaudio'
-                           '/worst[ext=mp4]/worst')
+        for proxy in shuffled:
+            tmpdir = tempfile.mkdtemp()
+            task['tmpdir'] = tmpdir
+            try:
+                if quality == 'worst':
+                    if HAS_FFMPEG:
+                        fmt = ('worstvideo[ext=mp4][vcodec^=avc]+worstaudio[ext=m4a]'
+                               '/worstvideo[ext=mp4]+worstaudio[ext=m4a]'
+                               '/worstvideo+worstaudio'
+                               '/worst[ext=mp4]/worst')
+                    else:
+                        fmt = 'worst[ext=mp4][vcodec^=avc]/worst[ext=mp4]/worst'
                 else:
-                    fmt = 'worst[ext=mp4][vcodec^=avc]/worst[ext=mp4]/worst'
-            else:
-                if HAS_FFMPEG:
-                    fmt = ('bestvideo[ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]'
-                           '/bestvideo[ext=mp4]+bestaudio[ext=m4a]'
-                           '/bestvideo+bestaudio'
-                           '/best[ext=mp4]/best')
-                else:
-                    fmt = 'best[ext=mp4][vcodec^=avc]/best[ext=mp4]/best'
+                    if HAS_FFMPEG:
+                        fmt = ('bestvideo[ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]'
+                               '/bestvideo[ext=mp4]+bestaudio[ext=m4a]'
+                               '/bestvideo+bestaudio'
+                               '/best[ext=mp4]/best')
+                    else:
+                        fmt = 'best[ext=mp4][vcodec^=avc]/best[ext=mp4]/best'
 
-            output_template = os.path.join(tmpdir, '%(id)s.%(ext)s')
+                output_template = os.path.join(tmpdir, '%(id)s.%(ext)s')
 
-            # Track multi-stream progress (video + audio are separate downloads)
-            _dl_state = {'streams_done': 0}
+                # Track multi-stream progress (video + audio are separate downloads)
+                _dl_state = {'streams_done': 0}
 
-            def _progress_hook(d):
-                task['last_activity'] = time.time()
-                if d.get('status') == 'downloading':
-                    task['status'] = 'downloading'
-                    total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
-                    downloaded = d.get('downloaded_bytes', 0)
-                    if total > 0:
-                        raw_pct = downloaded / total
+                def _progress_hook(d):
+                    task['last_activity'] = time.time()
+                    if d.get('status') == 'downloading':
+                        task['status'] = 'downloading'
+                        total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
+                        downloaded = d.get('downloaded_bytes', 0)
+                        if total > 0:
+                            raw_pct = downloaded / total
+                            if _dl_state['streams_done'] == 0:
+                                # First stream (video): map to 0–85 %
+                                task['progress'] = min(int(raw_pct * 85), 85)
+                            else:
+                                # Second stream (audio): map to 85–95 %
+                                task['progress'] = min(85 + int(raw_pct * 10), 95)
                         if _dl_state['streams_done'] == 0:
-                            # First stream (video): map to 0–85 %
-                            task['progress'] = min(int(raw_pct * 85), 85)
+                            task['message'] = 'Downloading video…'
                         else:
-                            # Second stream (audio): map to 85–95 %
-                            task['progress'] = min(85 + int(raw_pct * 10), 95)
-                    if _dl_state['streams_done'] == 0:
-                        task['message'] = 'Downloading video…'
-                    else:
-                        task['message'] = 'Downloading audio…'
-                elif d.get('status') == 'finished':
-                    _dl_state['streams_done'] += 1
-                    if _dl_state['streams_done'] == 1:
-                        task['progress'] = 85
-                        task['message'] = 'Video downloaded, fetching audio…'
-                    else:
-                        task['progress'] = 95
-                        task['message'] = 'Download complete, processing…'
+                            task['message'] = 'Downloading audio…'
+                    elif d.get('status') == 'finished':
+                        _dl_state['streams_done'] += 1
+                        if _dl_state['streams_done'] == 1:
+                            task['progress'] = 85
+                            task['message'] = 'Video downloaded, fetching audio…'
+                        else:
+                            task['progress'] = 95
+                            task['message'] = 'Download complete, processing…'
 
-            def _postprocessor_hook(d):
-                task['last_activity'] = time.time()
-                if d.get('status') == 'started':
-                    task['status'] = 'merging'
-                    task['progress'] = 96
-                    task['message'] = 'Merging video & audio…'
-                elif d.get('status') == 'finished':
-                    task['progress'] = 99
-                    task['message'] = 'Merge complete!'
+                def _postprocessor_hook(d):
+                    task['last_activity'] = time.time()
+                    if d.get('status') == 'started':
+                        task['status'] = 'merging'
+                        task['progress'] = 96
+                        task['message'] = 'Merging video & audio…'
+                    elif d.get('status') == 'finished':
+                        task['progress'] = 99
+                        task['message'] = 'Merge complete!'
 
-            ydl_opts = {
-                'format': fmt,
-                'proxy': f"http://{proxy}",
-                'quiet': True,
-                'no_warnings': True,
-                'outtmpl': output_template,
-                'restrictfilenames': True,
-                'noplaylist': True,
-                'socket_timeout': 30,
-                'concurrent_fragment_downloads': 8,
-                'extractor_args': {'youtube': {'player_client': ['ios,web']}},
-                'progress_hooks': [_progress_hook],
-                'postprocessor_hooks': [_postprocessor_hook],
-            }
-            if HAS_FFMPEG:
-                ydl_opts['merge_output_format'] = 'mp4'
-
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(video_url, download=True)
-                title = info.get('title', 'video')
-
-                downloaded_files = [
-                    f for f in os.listdir(tmpdir)
-                    if not f.endswith('.part') and not f.endswith('.ytdl')
-                ]
-                if not downloaded_files:
-                    shutil.rmtree(tmpdir, ignore_errors=True)
-                    continue
-
-                filepath = os.path.join(tmpdir, downloaded_files[0])
-                ext = os.path.splitext(downloaded_files[0])[1].lstrip('.') or 'mp4'
-                safe_filename = re.sub(r'[^\w\-_.]', '_', title)[:100] + f'.{ext}'
-
-                task['filepath'] = filepath
-                task['filename'] = safe_filename
-                task['filesize'] = os.path.getsize(filepath)
-                task['mime_type'] = _video_mime_from_ext(ext)
-                task['status'] = 'done'
-                task['progress'] = 100
-                task['message'] = 'Ready to download!'
-                return
-
-        except Exception as e:
-            shutil.rmtree(tmpdir, ignore_errors=True)
-            continue
-
-    task['status'] = 'error'
-    task['error'] = 'All proxies failed'
-    task['message'] = 'Download failed — please try again.'
-    unreserve_download()  # give back the reserved slot
-
-
-def _run_audio_download(task, video_url, audio_format, proxies):
-    """Download + convert audio in a background thread."""
-    shuffled = proxies.copy()
-    random.shuffle(shuffled)
-
-    for proxy in shuffled:
-        tmpdir = tempfile.mkdtemp()
-        task['tmpdir'] = tmpdir
-        try:
-            ext = audio_format.lower()
-            output_template = os.path.join(tmpdir, '%(id)s.%(ext)s')
-
-            def _progress_hook(d):
-                task['last_activity'] = time.time()
-                if d.get('status') == 'downloading':
-                    task['status'] = 'downloading'
-                    total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
-                    downloaded = d.get('downloaded_bytes', 0)
-                    if total > 0:
-                        task['progress'] = min(int(downloaded / total * 95), 95)
-                    task['message'] = 'Downloading audio…'
-                elif d.get('status') == 'finished':
-                    task['progress'] = 95
-                    task['message'] = 'Download complete, converting…'
-
-            def _postprocessor_hook(d):
-                task['last_activity'] = time.time()
-                if d.get('status') == 'started':
-                    task['status'] = 'merging'
-                    task['progress'] = 96
-                    task['message'] = f'Converting to .{ext}…'
-                elif d.get('status') == 'finished':
-                    task['progress'] = 99
-                    task['message'] = 'Conversion complete!'
-
-            ydl_opts = {
-                'format': 'bestaudio/best',
-                'proxy': f"http://{proxy}",
-                'quiet': True,
-                'no_warnings': True,
-                'outtmpl': output_template,
-                'restrictfilenames': True,
-                'noplaylist': True,
-                'socket_timeout': 30,
-                'concurrent_fragment_downloads': 8,
-                'extractor_args': {'youtube': {'player_client': ['ios,web']}},
-                'progress_hooks': [_progress_hook],
-                'postprocessor_hooks': [_postprocessor_hook],
-            }
-            if HAS_FFMPEG:
-                ydl_opts['postprocessors'] = [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': ext,
-                    'preferredquality': '192',
-                }]
-
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(video_url, download=True)
-                title = info.get('title', 'audio')
-
-                downloaded_files = [
-                    f for f in os.listdir(tmpdir)
-                    if not f.endswith('.part') and not f.endswith('.ytdl')
-                ]
-                if not downloaded_files:
-                    shutil.rmtree(tmpdir, ignore_errors=True)
-                    continue
-
-                filepath = os.path.join(tmpdir, downloaded_files[0])
-                actual_ext = os.path.splitext(downloaded_files[0])[1].lstrip('.') or ext
-                safe_filename = re.sub(r'[^\w\-_.]', '_', title)[:100] + f'.{actual_ext}'
-
-                mime_map = {
-                    'mp3': 'audio/mpeg',
-                    'wav': 'audio/wav',
-                    'm4a': 'audio/mp4',
-                    'opus': 'audio/opus',
-                    'webm': 'audio/webm',
-                    'ogg': 'audio/ogg',
+                ydl_opts = {
+                    'format': fmt,
+                    'proxy': f"http://{proxy}",
+                    'quiet': True,
+                    'no_warnings': True,
+                    'outtmpl': output_template,
+                    'restrictfilenames': True,
+                    'noplaylist': True,
+                    'socket_timeout': 30,
+                    'concurrent_fragment_downloads': 8,
+                    'extractor_args': {'youtube': {'player_client': ['ios,web']}},
+                    'progress_hooks': [_progress_hook],
+                    'postprocessor_hooks': [_postprocessor_hook],
                 }
+                if HAS_FFMPEG:
+                    ydl_opts['merge_output_format'] = 'mp4'
 
-                task['filepath'] = filepath
-                task['filename'] = safe_filename
-                task['filesize'] = os.path.getsize(filepath)
-                task['mime_type'] = mime_map.get(actual_ext, f'audio/{actual_ext}')
-                task['status'] = 'done'
-                task['progress'] = 100
-                task['message'] = 'Ready to download!'
-                return
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(video_url, download=True)
+                    title = info.get('title', 'video')
 
-        except Exception as e:
-            shutil.rmtree(tmpdir, ignore_errors=True)
-            continue
-
-    task['status'] = 'error'
-    task['error'] = 'All proxies failed'
-    task['message'] = 'Download failed — please try again.'
-    unreserve_download()  # give back the reserved slot
-
-
-def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_format, proxies):
-    """Search YouTube for a Spotify track match and download it as audio.
-
-    Matches the proven approach from Spotify-Scraper/server/routes.ts:
-    search YouTube, filter by ±2s duration, pick closest match.
-    """
-    import subprocess
-
-    target_dur_s = int(round(duration_ms / 1000))
-    search_query = f"{track_artist} - {track_title}"
-    ext = (audio_format or 'mp3').lower()
-
-    task['status'] = 'downloading'
-    task['message'] = 'Downloading from Spotify…'
-    task['progress'] = 5
-
-    shuffled = proxies.copy()
-    random.shuffle(shuffled)
-
-    # ── Phase 1: Search YouTube via yt-dlp CLI (same as routes.ts) ──
-    # Uses --flat-playlist --print to get id, title, duration in one fast call
-    yt_dlp_path = shutil.which('yt-dlp') or 'yt-dlp'
-    search_results = []
-
-    for proxy in shuffled[:3]:  # Try up to 3 proxies for search
-        try:
-            cmd = [
-                yt_dlp_path,
-                f'ytsearch10:{search_query}',
-                '--flat-playlist',
-                '--print', '%(id)s\t%(title)s\t%(duration)s',
-                '--no-download',
-                '--proxy', f'http://{proxy}',
-            ]
-            proc = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=30,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-            )
-            if proc.stdout.strip():
-                for line in proc.stdout.strip().split('\n'):
-                    line = line.strip()
-                    if not line:
+                    downloaded_files = [
+                        f for f in os.listdir(tmpdir)
+                        if not f.endswith('.part') and not f.endswith('.ytdl')
+                    ]
+                    if not downloaded_files:
+                        shutil.rmtree(tmpdir, ignore_errors=True)
                         continue
-                    parts = line.split('\t')
-                    if len(parts) >= 3:
-                        vid_id = parts[0].strip()
-                        vid_title = parts[1].strip()
-                        try:
-                            vid_dur = int(round(float(parts[2].strip())))
-                        except (ValueError, TypeError):
-                            continue
-                        if vid_id and vid_dur > 0:
-                            search_results.append({
-                                'id': vid_id,
-                                'title': vid_title,
-                                'duration': vid_dur,
-                            })
-                if search_results:
-                    break
-        except Exception as e:
-            print(f"[spotify-dl] Search failed with proxy: {e}")
-            continue
 
-    task['progress'] = 25
-    task['message'] = 'Processing…'
+                    filepath = os.path.join(tmpdir, downloaded_files[0])
+                    ext = os.path.splitext(downloaded_files[0])[1].lstrip('.') or 'mp4'
+                    safe_filename = re.sub(r'[^\w\-_.]', '_', title)[:100] + f'.{ext}'
 
-    print(f"[spotify-dl] Found {len(search_results)} YouTube results for \"{search_query}\" (target: {target_dur_s}s)")
-    for r in search_results:
-        diff = abs(r['duration'] - target_dur_s)
-        print(f"  - [{r['id']}] \"{r['title']}\" duration: {r['duration']}s (diff: {diff}s)")
+                    task['filepath'] = filepath
+                    task['filename'] = safe_filename
+                    task['filesize'] = os.path.getsize(filepath)
+                    task['mime_type'] = _video_mime_from_ext(ext)
+                    task['status'] = 'done'
+                    task['progress'] = 100
+                    task['message'] = 'Ready to download!'
+                    return
+            except Exception as e:
+                last_error = e
+                if "402 Payment Required" not in str(e):
+                    all_402 = False
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                continue
 
-    if not search_results:
-        task['status'] = 'error'
-        task['error'] = 'No search results found'
-        task['message'] = f'Could not find "{search_query}" on YouTube.'
-        unreserve_download()
-        return
+        if all_402:
+            rotate_proxy_group()
+        else:
+            break
+            
+    task['status'] = 'error'
+    task['error'] = str(last_error) if last_error else 'All proxies failed'
+    task['message'] = 'Download failed — please try again.'
+    unreserve_download()
 
-    # ── Phase 2: Filter by ±2s duration (same as routes.ts line 259-261) ──
-    matched = [r for r in search_results if abs(r['duration'] - target_dur_s) <= 2]
 
-    if not matched:
-        task['status'] = 'error'
-        task['error'] = 'No matching song found'
-        diffs_info = ', '.join([f"{r['title']}({abs(r['duration'] - target_dur_s)}s)" for r in search_results[:5]])
-        task['message'] = f'No result within ±2s of {target_dur_s}s. Closest: {diffs_info}'
-        unreserve_download()
-        return
+def _run_audio_download(task, video_url, audio_format, proxies=None):
+    """Download + convert audio in a background thread, rotating on 402."""
+    last_error = None
+    
+    for attempt in range(2):
+        shuffled = PROXIES.copy()
+        random.shuffle(shuffled)
+        all_402 = True
 
-    # Pick the one with the smallest duration difference (same as routes.ts line 276-281)
-    best_match = min(matched, key=lambda r: abs(r['duration'] - target_dur_s))
-    best_url = f"https://www.youtube.com/watch?v={best_match['id']}"
-    best_diff = abs(best_match['duration'] - target_dur_s)
+        for proxy in shuffled:
+            tmpdir = tempfile.mkdtemp()
+            task['tmpdir'] = tmpdir
+            try:
+                ext = audio_format.lower()
+                output_template = os.path.join(tmpdir, '%(id)s.%(ext)s')
 
-    print(f"[spotify-dl] Best match: \"{best_match['title']}\" ({best_match['duration']}s, diff: {best_diff}s)")
+                def _progress_hook(d):
+                    task['last_activity'] = time.time()
+                    if d.get('status') == 'downloading':
+                        task['status'] = 'downloading'
+                        total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
+                        downloaded = d.get('downloaded_bytes', 0)
+                        if total > 0:
+                            task['progress'] = min(int(downloaded / total * 95), 95)
+                        task['message'] = 'Downloading audio…'
+                    elif d.get('status') == 'finished':
+                        task['progress'] = 95
+                        task['message'] = 'Download complete, converting…'
 
-    task['progress'] = 35
-    task['message'] = 'Downloading audio…'
+                def _postprocessor_hook(d):
+                    task['last_activity'] = time.time()
+                    if d.get('status') == 'started':
+                        task['status'] = 'merging'
+                        task['progress'] = 96
+                        task['message'] = f'Converting to .{ext}…'
+                    elif d.get('status') == 'finished':
+                        task['progress'] = 99
+                        task['message'] = 'Conversion complete!'
 
-    # ── Phase 3: Download best match as audio via proxies ──
-    for proxy in shuffled:
-        tmpdir = tempfile.mkdtemp()
-        task['tmpdir'] = tmpdir
-        try:
-            output_template = os.path.join(tmpdir, '%(id)s.%(ext)s')
-
-            def _progress_hook(d):
-                task['last_activity'] = time.time()
-                if d.get('status') == 'downloading':
-                    task['status'] = 'downloading'
-                    total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
-                    downloaded = d.get('downloaded_bytes', 0)
-                    if total > 0:
-                        task['progress'] = min(40 + int(downloaded / total * 50), 90)
-                    task['message'] = 'Downloading audio…'
-                elif d.get('status') == 'finished':
-                    task['progress'] = 90
-                    task['message'] = 'Download complete, converting…'
-
-            def _postprocessor_hook(d):
-                task['last_activity'] = time.time()
-                if d.get('status') == 'started':
-                    task['status'] = 'merging'
-                    task['progress'] = 92
-                    task['message'] = f'Converting to .{ext}…'
-                elif d.get('status') == 'finished':
-                    task['progress'] = 98
-                    task['message'] = 'Conversion complete!'
-
-            ydl_opts = {
-                'format': 'bestaudio/best',
-                'proxy': f"http://{proxy}",
-                'quiet': True,
-                'no_warnings': True,
-                'outtmpl': output_template,
-                'restrictfilenames': True,
-                'noplaylist': True,
-                'socket_timeout': 30,
-                'concurrent_fragment_downloads': 8,
-                'extractor_args': {'youtube': {'player_client': ['ios,web']}},
-                'progress_hooks': [_progress_hook],
-                'postprocessor_hooks': [_postprocessor_hook],
-            }
-            if HAS_FFMPEG:
-                ydl_opts['postprocessors'] = [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': ext,
-                    'preferredquality': '0',
-                }]
-
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([best_url])
-
-                downloaded_files = [
-                    f for f in os.listdir(tmpdir)
-                    if not f.endswith('.part') and not f.endswith('.ytdl')
-                ]
-                if not downloaded_files:
-                    shutil.rmtree(tmpdir, ignore_errors=True)
-                    continue
-
-                filepath = os.path.join(tmpdir, downloaded_files[0])
-                actual_ext = os.path.splitext(downloaded_files[0])[1].lstrip('.') or ext
-                safe_filename = re.sub(r'[^\w\-_.]', '_', f"{track_artist} - {track_title}")[:100] + f'.{actual_ext}'
-
-                mime_map = {
-                    'mp3': 'audio/mpeg',
-                    'wav': 'audio/wav',
-                    'm4a': 'audio/mp4',
-                    'opus': 'audio/opus',
-                    'webm': 'audio/webm',
-                    'ogg': 'audio/ogg',
+                ydl_opts = {
+                    'format': 'bestaudio/best',
+                    'proxy': f"http://{proxy}",
+                    'quiet': True,
+                    'no_warnings': True,
+                    'outtmpl': output_template,
+                    'restrictfilenames': True,
+                    'noplaylist': True,
+                    'socket_timeout': 30,
+                    'concurrent_fragment_downloads': 8,
+                    'extractor_args': {'youtube': {'player_client': ['ios,web']}},
+                    'progress_hooks': [_progress_hook],
+                    'postprocessor_hooks': [_postprocessor_hook],
                 }
+                if HAS_FFMPEG:
+                    ydl_opts['postprocessors'] = [{
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': ext,
+                        'preferredquality': '192',
+                    }]
 
-                task['filepath'] = filepath
-                task['filename'] = safe_filename
-                task['filesize'] = os.path.getsize(filepath)
-                task['mime_type'] = mime_map.get(actual_ext, f'audio/{actual_ext}')
-                task['status'] = 'done'
-                task['progress'] = 100
-                task['message'] = 'Ready to download!'
-                return
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(video_url, download=True)
+                    title = info.get('title', 'audio')
 
-        except Exception as e:
-            shutil.rmtree(tmpdir, ignore_errors=True)
-            continue
+                    downloaded_files = [
+                        f for f in os.listdir(tmpdir)
+                        if not f.endswith('.part') and not f.endswith('.ytdl')
+                    ]
+                    if not downloaded_files:
+                        shutil.rmtree(tmpdir, ignore_errors=True)
+                        continue
+
+                    filepath = os.path.join(tmpdir, downloaded_files[0])
+                    actual_ext = os.path.splitext(downloaded_files[0])[1].lstrip('.') or ext
+                    safe_filename = re.sub(r'[^\w\-_.]', '_', title)[:100] + f'.{actual_ext}'
+
+                    mime_map = {
+                        'mp3': 'audio/mpeg',
+                        'wav': 'audio/wav',
+                        'm4a': 'audio/mp4',
+                        'opus': 'audio/opus',
+                        'webm': 'audio/webm',
+                        'ogg': 'audio/ogg',
+                    }
+                    task['filename'] = safe_filename
+                    task['filesize'] = os.path.getsize(filepath)
+                    task['mime_type'] = mime_map.get(actual_ext, f'audio/{actual_ext}')
+                    task['status'] = 'done'
+                    task['progress'] = 100
+                    task['message'] = 'Ready to download!'
+                    return
+            except Exception as e:
+                last_error = e
+                if "402 Payment Required" not in str(e):
+                    all_402 = False
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                continue
+
+        if all_402:
+            rotate_proxy_group()
+        else:
+            break
 
     task['status'] = 'error'
-    task['error'] = 'All proxies failed during download'
+    task['error'] = str(last_error) if last_error else 'All proxies failed'
+    task['message'] = 'Download failed — please try again.'
+    unreserve_download()
+
+
+def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_format, proxies=None):
+    """Search YouTube for a Spotify track match and download it as audio, rotating on 402."""
+    last_error = None
+    
+    for attempt in range(2):
+        shuffled = PROXIES.copy()
+        random.shuffle(shuffled)
+        all_402 = True
+
+        for proxy in shuffled:
+            tmpdir = tempfile.mkdtemp()
+            task['tmpdir'] = tmpdir
+            try:
+                ext = audio_format.lower()
+                target_dur_s = duration_ms / 1000.0
+
+                # Phase 1: Search YouTube for the track
+                task['message'] = f'Searching YouTube for "{track_title}"…'
+                search_query = f"ytsearch10:{track_artist} - {track_title}"
+                ydl_opts_search = {
+                    'proxy': f"http://{proxy}",
+                    'quiet': True,
+                    'no_warnings': True,
+                    'extract_flat': True,
+                    'socket_timeout': 15,
+                }
+                with yt_dlp.YoutubeDL(ydl_opts_search) as ydl:
+                    results = ydl.extract_info(search_query, download=False)
+                    entries = results.get('entries', [])
+
+                # Phase 2: Find the best match
+                candidates = []
+                for entry in entries:
+                    res = _score_spotify_candidate(track_title, [track_artist], target_dur_s, entry)
+                    if res:
+                        candidates.append((res[0], entry['url']))
+
+                if not candidates:
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+                    continue # Try next proxy or finish loop
+
+                best_url = sorted(candidates, key=lambda x: x[0], reverse=True)[0][1]
+
+                # Phase 3: Download the best match
+                def _progress_hook(d):
+                    task['last_activity'] = time.time()
+                    if d.get('status') == 'downloading':
+                        task['status'] = 'downloading'
+                        total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
+                        downloaded = d.get('downloaded_bytes', 0)
+                        if total > 0:
+                            task['progress'] = min(int(downloaded / total * 90), 90)
+                        task['message'] = 'Downloading track…'
+                    elif d.get('status') == 'finished':
+                        task['progress'] = 90
+                        task['message'] = 'Download complete, converting…'
+
+                def _postprocessor_hook(d):
+                    task['last_activity'] = time.time()
+                    if d.get('status') == 'started':
+                        task['progress'] = 92
+                        task['message'] = f'Converting to .{ext}…'
+                    elif d.get('status') == 'finished':
+                        task['progress'] = 99
+                        task['message'] = 'Conversion complete!'
+
+                ydl_opts = {
+                    'format': 'bestaudio/best',
+                    'proxy': f"http://{proxy}",
+                    'quiet': True,
+                    'no_warnings': True,
+                    'outtmpl': os.path.join(tmpdir, '%(id)s.%(ext)s'),
+                    'restrictfilenames': True,
+                    'noplaylist': True,
+                    'socket_timeout': 30,
+                    'concurrent_fragment_downloads': 8,
+                    'extractor_args': {'youtube': {'player_client': ['ios,web']}},
+                    'progress_hooks': [_progress_hook],
+                    'postprocessor_hooks': [_postprocessor_hook],
+                }
+                if HAS_FFMPEG:
+                    ydl_opts['postprocessors'] = [{
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': ext,
+                        'preferredquality': '0',
+                    }]
+
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([best_url])
+
+                    downloaded_files = [
+                        f for f in os.listdir(tmpdir)
+                        if not f.endswith('.part') and not f.endswith('.ytdl')
+                    ]
+                    if not downloaded_files:
+                        shutil.rmtree(tmpdir, ignore_errors=True)
+                        continue
+
+                    filepath = os.path.join(tmpdir, downloaded_files[0])
+                    actual_ext = os.path.splitext(downloaded_files[0])[1].lstrip('.') or ext
+                    safe_filename = re.sub(r'[^\w\-_.]', '_', f"{track_artist} - {track_title}")[:100] + f'.{actual_ext}'
+
+                    mime_map = {
+                        'mp3': 'audio/mpeg',
+                        'wav': 'audio/wav',
+                        'm4a': 'audio/mp4',
+                        'opus': 'audio/opus',
+                        'webm': 'audio/webm',
+                        'ogg': 'audio/ogg',
+                    }
+
+                    task['filepath'] = filepath
+                    task['filename'] = safe_filename
+                    task['filesize'] = os.path.getsize(filepath)
+                    task['mime_type'] = mime_map.get(actual_ext, f'audio/{actual_ext}')
+                    task['status'] = 'done'
+                    task['progress'] = 100
+                    task['message'] = 'Ready to download!'
+                    return
+            except Exception as e:
+                last_error = e
+                if "402 Payment Required" not in str(e):
+                    all_402 = False
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                continue
+
+        if all_402:
+            rotate_proxy_group()
+        else:
+            break
+
+    task['status'] = 'error'
+    task['error'] = str(last_error) if last_error else 'All proxies failed during download'
     task['message'] = 'Download failed — please try again.'
     unreserve_download()
 
@@ -1816,12 +1825,7 @@ def download_file(task_id):
 
 @app.route('/proxy_image')
 def proxy_image():
-    """Proxy an external image through this server.
-
-    Usage:  /proxy_image?url=<encoded-image-url>
-    Only allows scontent*.cdninstagram.com and *.fbcdn.net hosts so we don't
-    become an open proxy.
-    """
+    """Proxy an external image through this server, rotating on failure."""
     from urllib.parse import urlparse
 
     img_url = request.args.get('url', '')
@@ -1833,43 +1837,63 @@ def proxy_image():
     if not allowed:
         return '', 403
 
+    for attempt in range(2):
+        shuffled = PROXIES.copy()
+        random.shuffle(shuffled)
+        all_402 = True
+
+        for proxy_str in shuffled[:4]: # Try up to 4 proxies from current group
+            try:
+                proxy_url = f"http://{proxy_str}"
+                resp = requests.get(
+                    img_url,
+                    headers={
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                                      'AppleWebKit/537.36 (KHTML, like Gecko) '
+                                      'Chrome/120.0.0.0 Safari/537.36',
+                        'Referer': 'https://www.instagram.com/',
+                        'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+                    },
+                    proxies={'http': proxy_url, 'https': proxy_url},
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    ct = resp.headers.get('Content-Type', 'image/jpeg')
+                    return Response(
+                        resp.content,
+                        content_type=ct,
+                        headers={'Cache-Control': 'public, max-age=86400'},
+                    )
+                if resp.status_code != 402:
+                    all_402 = False
+            except Exception as e:
+                if "402" not in str(e):
+                    all_402 = False
+                continue
+        
+        if all_402:
+            rotate_proxy_group()
+        else:
+            break
+
+    # Final fallback without proxy
     try:
-        proxy_str = random.choice(PROXIES)
-        proxy_url = f"http://{proxy_str}"
         resp = requests.get(
             img_url,
             headers={
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                              'AppleWebKit/537.36 (KHTML, like Gecko) '
-                              'Chrome/120.0.0.0 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0',
                 'Referer': 'https://www.instagram.com/',
-                'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+                'Accept': 'image/*,*/*;q=0.8',
             },
-            proxies={'http': proxy_url, 'https': proxy_url},
             timeout=10,
         )
-        if resp.status_code != 200:
-            # Retry without proxy
-            resp = requests.get(
-                img_url,
-                headers={
-                    'User-Agent': 'Mozilla/5.0',
-                    'Referer': 'https://www.instagram.com/',
-                    'Accept': 'image/*,*/*;q=0.8',
-                },
-                timeout=10,
-            )
-        if resp.status_code != 200:
-            return '', resp.status_code
+        if resp.status_code == 200:
+            ct = resp.headers.get('Content-Type', 'image/jpeg')
+            return Response(resp.content, content_type=ct)
+    except:
+        pass
 
-        ct = resp.headers.get('Content-Type', 'image/jpeg')
-        return Response(
-            resp.content,
-            content_type=ct,
-            headers={'Cache-Control': 'public, max-age=86400'},
-        )
-    except Exception:
-        return '', 502
+    return '', 502
 
 
 # Legacy direct-download routes (kept as fallbacks) ────────────────────────
@@ -1894,17 +1918,18 @@ def download_audio():
 
 @app.route('/get_formats')
 def get_formats():
-    """Get available video formats for a URL"""
+    """Get available video formats for a URL, rotating on failure."""
     video_url = request.args.get('url')
-    
     if not video_url:
         return {'error': 'No URL provided'}, 400
 
-    try:
-        shuffled_proxies = PROXIES.copy()
-        random.shuffle(shuffled_proxies)
-        
-        for proxy in shuffled_proxies:
+    last_error = None
+    for attempt in range(2):
+        shuffled = PROXIES.copy()
+        random.shuffle(shuffled)
+        all_402 = True
+
+        for proxy in shuffled:
             try:
                 ydl_opts = {
                     'proxy': f"http://{proxy}",
@@ -1914,13 +1939,8 @@ def get_formats():
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(video_url, download=False)
                     formats = info.get('formats', [])
-
-                    # Show the actual best/worst resolution available
-                    # (including DASH/adaptive formats since we now merge them)
-                    video_fmts = [
-                        f for f in formats
-                        if f.get('vcodec') != 'none' and f.get('height')
-                    ]
+                    video_fmts = [f for f in formats if f.get('vcodec') != 'none' and f.get('height')]
+                    
                     if video_fmts:
                         best_height = max(f.get('height', 0) for f in video_fmts)
                         worst_height = min(f.get('height', 0) for f in video_fmts)
@@ -1928,14 +1948,19 @@ def get_formats():
                             'best_quality': f"{best_height}p" if best_height else 'Best',
                             'worst_quality': f"{worst_height}p" if worst_height else 'Low',
                         }
-                    
                     return {'best_quality': 'HD', 'worst_quality': 'SD'}
-            except Exception:
+            except Exception as e:
+                last_error = e
+                if "402" not in str(e):
+                    all_402 = False
                 continue
         
-        return {'best_quality': 'HD', 'worst_quality': 'SD'}
-    except Exception:
-        return {'best_quality': 'HD', 'worst_quality': 'SD'}
+        if all_402:
+            rotate_proxy_group()
+        else:
+            break
+            
+    return {'best_quality': 'HD', 'worst_quality': 'SD'}
 
 
 if __name__ == '__main__':
