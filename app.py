@@ -73,16 +73,27 @@ _DL_LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.downlo
 _dl_log_lock = threading.Lock()
 
 
+def _get_client_ip():
+    """Get the client IP, handling proxies (X-Forwarded-For)."""
+    if request.headers.getlist("X-Forwarded-For"):
+        return request.headers.getlist("X-Forwarded-For")[0].split(',')[0].strip()
+    return request.remote_addr or '127.0.0.1'
+
+
 def _load_download_log():
-    """Load timestamps from disk. Caller must hold _dl_log_lock."""
+    """Load ip-based timestamps from disk. Caller must hold _dl_log_lock.
+    Returns: dict { ip: [timestamps] }
+    """
     try:
         with open(_DL_LOG_FILE, 'r') as f:
             data = json.load(f)
-            if isinstance(data, list):
+            if isinstance(data, dict):
                 return data
+            # Migration: if it was a list (old global log), ignore or convert
+            return {}
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         pass
-    return []
+    return {}
 
 
 def _save_download_log(log):
@@ -101,25 +112,47 @@ def _save_download_log(log):
 
 
 def _prune_log(log):
-    """Remove entries older than 24 hours. Returns pruned list."""
-    cutoff = time.time() - 86400
-    return [ts for ts in log if ts > cutoff]
+    """Remove entries older than 24 hours from the log dict.
+    Returns the cleaned dict.
+    """
+    now = time.time()
+    cutoff = now - 86400
+    new_log = {}
+    
+    # log is { ip: [ts1, ts2, ...] }
+    if isinstance(log, list):
+        # Handle migration/legacy case if needed, or just discard
+        return {}
+
+    for ip, timestamps in log.items():
+        valid_ts = [t for t in timestamps if t > cutoff]
+        if valid_ts:
+            new_log[ip] = valid_ts
+            
+    return new_log
 
 
 def downloads_remaining():
-    """How many downloads are still allowed in the current 24-h window."""
+    """How many downloads are still allowed for the current IP in the 24-h window."""
+    ip = _get_client_ip()
     with _dl_log_lock:
         log = _prune_log(_load_download_log())
-        return max(DAILY_DOWNLOAD_LIMIT - len(log), 0)
+        user_log = log.get(ip, [])
+        return max(DAILY_DOWNLOAD_LIMIT - len(user_log), 0)
 
 
 def try_reserve_download():
-    """Atomically check limit AND record a download. Returns True if allowed."""
+    """Atomically check limit AND record a download for the current IP. Returns True if allowed."""
+    ip = _get_client_ip()
     with _dl_log_lock:
         log = _prune_log(_load_download_log())
-        if len(log) >= DAILY_DOWNLOAD_LIMIT:
+        user_log = log.get(ip, [])
+        
+        if len(user_log) >= DAILY_DOWNLOAD_LIMIT:
             return False
-        log.append(time.time())
+            
+        user_log.append(time.time())
+        log[ip] = user_log
         _save_download_log(log)
         return True
 
