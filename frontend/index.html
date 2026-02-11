@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Platform Downloader</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+    <!-- Loading Overlay (for fetching info) -->
+    <div class="loader-overlay" id="loaderOverlay">
+        <div class="loader">
+            <div class="circle">
+                <div class="dot"></div>
+                <div class="outline"></div>
+            </div>
+            <div class="circle">
+                <div class="dot"></div>
+                <div class="outline"></div>
+            </div>
+            <div class="circle">
+                <div class="dot"></div>
+                <div class="outline"></div>
+            </div>
+            <div class="circle">
+                <div class="dot"></div>
+                <div class="outline"></div>
+            </div>
+        </div>
+        <div class="loader-text">Fetching media info...</div>
+    </div>
+
+    <!-- Download Progress Overlay -->
+    <div class="dl-progress-overlay" id="dlProgressOverlay">
+        <div class="dl-progress-card">
+            <div class="dl-progress-title" id="dlTitle">Processing your request</div>
+
+            <div class="dl-progress-percent" id="dlPercent">0%</div>
+            <div class="dl-progress-bar-wrap">
+                <div class="dl-progress-bar" id="dlBar"></div>
+            </div>
+            <div class="dl-progress-msg" id="dlMsg">Preparing…</div>
+
+            <div class="dl-steps">
+                <div class="dl-step active" id="stepDownload">
+                    <div class="dl-step-icon">⬇️</div>
+                    <div class="dl-step-text">
+                        <div class="dl-step-label">Downloading</div>
+                        <div class="dl-step-sub" id="stepDownloadSub">Fetching video from server…</div>
+                    </div>
+                </div>
+                <div class="dl-step" id="stepMerge">
+                    <div class="dl-step-icon">🔀</div>
+                    <div class="dl-step-text">
+                        <div class="dl-step-label">Merging Audio & Video</div>
+                        <div class="dl-step-sub" id="stepMergeSub">Combining streams into .mp4</div>
+                    </div>
+                </div>
+                <div class="dl-step" id="stepDone">
+                    <div class="dl-step-icon">✅</div>
+                    <div class="dl-step-text">
+                        <div class="dl-step-label">Ready!</div>
+                        <div class="dl-step-sub">Your file is ready to save</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="header">
+            <h1>Multi Downloader</h1>
+            <p>Download from YouTube, TikTok, Facebook, Instagram & Spotify</p>
+            <div class="downloads-remaining" id="dlRemaining">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                <span><span class="dl-count" id="dlCount">--</span> / 100 downloads remaining today</span>
+            </div>
+        </div>
+
+        <div class="platform-icons">
+            <div class="platform-icon youtube" data-name="YouTube">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="#FF0000">
+                    <path
+                        d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+                </svg>
+            </div>
+            <div class="platform-icon tiktok" data-name="TikTok">
+                <svg width="22" height="24" viewBox="0 0 448 512" fill="white">
+                    <path
+                        d="M448,209.91a210.06,210.06,0,0,1-122.77-39.25V349.38A162.55,162.55,0,1,1,185,188.31V278.2a74.62,74.62,0,1,0,52.23,71.18V0l88,0a121.18,121.18,0,0,0,1.86,22.17h0A122.18,122.18,0,0,0,381,102.39a121.43,121.43,0,0,0,67,20.14Z" />
+                </svg>
+            </div>
+            <div class="platform-icon facebook" data-name="Facebook">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="#1877F2">
+                    <path
+                        d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.954v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                </svg>
+            </div>
+            <div class="platform-icon instagram" data-name="Instagram">
+                <svg width="26" height="26" viewBox="0 0 24 24">
+                    <defs>
+                        <radialGradient id="ig-grad" cx="30%" cy="107%" r="150%">
+                            <stop offset="0%" stop-color="#fdf497" />
+                            <stop offset="5%" stop-color="#fdf497" />
+                            <stop offset="45%" stop-color="#fd5949" />
+                            <stop offset="60%" stop-color="#d6249f" />
+                            <stop offset="90%" stop-color="#285AEB" />
+                        </radialGradient>
+                    </defs>
+                    <path fill="url(#ig-grad)"
+                        d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" />
+                </svg>
+            </div>
+            <div class="platform-icon spotify" data-name="Spotify">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="#1DB954">
+                    <path
+                        d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.26.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.72 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z" />
+                </svg>
+            </div>
+        </div>
+
+        <form method="POST" id="fetchForm">
+            <div class="form-group">
+                <input type="text" name="url" id="urlInput" class="input-field"
+                    placeholder="Paste any video or Spotify URL here..." required>
+            </div>
+            <button type="submit" class="btn btn-primary" id="submitBtn">
+                <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <path d="m21 21-4.3-4.3"></path>
+                </svg>
+                Get Info
+            </button>
+        </form>
+
+        <div class="error-box" id="errorBox" style="display: none;"></div>
+
+        <!-- Dynamic Results Container -->
+        <div id="resultContainer"></div>
+
+    </div>
+
+    <script src="js/main.js"></script>
+</body>
+
+</html>

@@ -1,3 +1,6 @@
 __pycache__/
 .venv/
 .download_log.json
+
+# Local Netlify folder
+.netlify
