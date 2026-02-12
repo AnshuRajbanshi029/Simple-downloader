@@ -933,7 +933,7 @@ def _artist_coverage(artists, haystack):
     return hits / len(artists)
 
 
-def _score_spotify_candidate(track_title, track_artists, target_dur_s, candidate, tolerance=2):
+def _score_spotify_candidate(track_title, track_artists, target_dur_s, candidate, tolerance=5):
     """Score a yt-dlp search result against the Spotify track.
 
     Returns (score, duration_diff) or None if the candidate is rejected.
@@ -943,9 +943,13 @@ def _score_spotify_candidate(track_title, track_artists, target_dur_s, candidate
     duration = candidate.get("duration")
     url = candidate.get("webpage_url") or candidate.get("url")
 
-    if not title or not url or duration is None:
+    if not title or not url:
         return None
-
+    
+    # If duration is missing slightly risky but allow it if titles match well
+    if duration is None:
+        duration = target_dur_s
+        
     duration = int(duration)
     duration_diff = abs(duration - target_dur_s)
     if duration_diff > tolerance:
@@ -959,12 +963,23 @@ def _score_spotify_candidate(track_title, track_artists, target_dur_s, candidate
     norm_candidate = _normalize_text(title)
     title_similarity = SequenceMatcher(None, norm_target, norm_candidate).ratio()
 
-    artist_list = [a.strip() for a in track_artists.split(",")] if isinstance(track_artists, str) else list(track_artists)
+    # Handle list or string for artists
+    if isinstance(track_artists, str):
+        artist_list = [a.strip() for a in track_artists.split(",")]
+    else:
+        artist_list = list(track_artists)
+        
     artist_cov = _artist_coverage(artist_list, combined_text)
 
-    if artist_cov < 0.50:
-        return None
-    if title_similarity < 0.70:
+    # RELAXED THRESHOLDS:
+    # Was 0.50 -> Now 0.35 (sometimes artist name is just "The Weeknd" vs "Weeknd" etc)
+    if artist_cov < 0.35:
+        # Special case: if title is exceptionally similar (>0.9), allow low artist coverage
+        if title_similarity < 0.9:
+            return None
+            
+    # Was 0.70 -> Now 0.55
+    if title_similarity < 0.55:
         return None
 
     duration_score = 1.0 - (duration_diff / max(tolerance, 1))
@@ -1603,8 +1618,8 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
                 target_dur_s = duration_ms / 1000.0
 
                 # Phase 1: Search YouTube for the track
-                task['message'] = f'Searching YouTube for "{track_title}"…'
-                search_query = f"ytsearch10:{track_artist} - {track_title}"
+                task['message'] = 'Extracting audio configuration…'
+                search_query = f"ytsearch10:{track_artist} - {track_title} audio"
                 ydl_opts_search = {
                     'proxy': f"http://{proxy}",
                     'quiet': True,
@@ -1619,7 +1634,8 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
                 # Phase 2: Find the best match
                 candidates = []
                 for entry in entries:
-                    res = _score_spotify_candidate(track_title, [track_artist], target_dur_s, entry)
+                    # Relaxed tolerance: 5s duration diff, lower similarity/coverage thresholds
+                    res = _score_spotify_candidate(track_title, [track_artist], target_dur_s, entry, tolerance=5)
                     if res:
                         candidates.append((res[0], entry['url']))
 
@@ -1638,10 +1654,10 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
                         downloaded = d.get('downloaded_bytes', 0)
                         if total > 0:
                             task['progress'] = min(int(downloaded / total * 90), 90)
-                        task['message'] = 'Downloading track…'
+                        task['message'] = 'Decrypting audio stream…'
                     elif d.get('status') == 'finished':
                         task['progress'] = 90
-                        task['message'] = 'Download complete, converting…'
+                        task['message'] = 'Stream decrypted, encoding…'
 
                 def _postprocessor_hook(d):
                     task['last_activity'] = time.time()
