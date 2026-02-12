@@ -15,7 +15,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     form.addEventListener('submit', function (e) {
         e.preventDefault();
-        
+
         const url = urlInput.value.trim();
         if (!url) return;
 
@@ -25,31 +25,37 @@ document.addEventListener('DOMContentLoaded', function () {
         errorBox.textContent = '';
         resultContainer.innerHTML = ''; // Clear previous results
 
+        const bodyVal = JSON.stringify({ url: url });
+        console.log('[DEBUG] resolving URL:', url);
+
         fetch(`${API_BASE_URL}/api/resolve`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ url: url })
+            body: bodyVal
         })
-        .then(response => response.json())
-        .then(data => {
-            loader.classList.remove('active');
-            submitBtn.disabled = false;
+            .then(response => response.json())
+            .then(data => {
+                console.log('[DEBUG] resolve response:', data);
+                loader.classList.remove('active');
+                submitBtn.disabled = false;
 
-            if (data.error) {
-                showError(data.error);
-            } else {
-                playSuccessTone();
-                renderVideoCard(data, url);
-            }
-        })
-        .catch(err => {
-            loader.classList.remove('active');
-            submitBtn.disabled = false;
-            showError('Network error or server unavailable.');
-            console.error(err);
-        });
+                if (data.error) {
+                    console.error('[DEBUG] API returned error:', data.error);
+                    showError(data.error);
+                } else {
+                    playSuccessTone();
+                    renderVideoCard(data, url);
+                }
+            })
+            .catch(err => {
+                console.error('[DEBUG] Fetch error:', err);
+                loader.classList.remove('active');
+                submitBtn.disabled = false;
+                showError('Network error or server unavailable.');
+                console.error(err);
+            });
     });
 });
 
@@ -71,7 +77,7 @@ function updateDlCounter() {
             if (d.remaining <= 0) wrap.classList.add('depleted');
             else if (d.remaining <= 20) wrap.classList.add('low');
         })
-        .catch(() => {});
+        .catch(() => { });
 }
 
 function playSuccessTone() {
@@ -96,22 +102,22 @@ function playSuccessTone() {
 
 function renderVideoCard(info, originalUrl) {
     const container = document.getElementById('resultContainer');
-    
+
     // Determine platform specific details
     let platformIcon = '';
     let platformName = '';
-    
+
     // Simple platform mapping based on icon content from original - dynamic icons are hard to pass directly
     // Ideally the API returns icon SVG or URL, for now we can infer or pass simple names
     // info.platform has the ID (youtube, tiktok, etc)
-    
+
     const platformId = info.platform || 'youtube';
-    const platformConfig = info.platform_config || {}; 
+    const platformConfig = info.platform_config || {};
     const platformColor = platformConfig.color || '#FF0000';
-    
+
     // Helper to generate download buttons HTML
     let downloadOptionsHtml = '';
-    
+
     if (info.is_spotify) {
         downloadOptionsHtml = `
         <div class="download-options" id="spotifyDownloadOptions" 
@@ -174,14 +180,14 @@ function renderVideoCard(info, originalUrl) {
     // If the image url is relative (starts with /proxy_image), prepend API_BASE_URL
     let thumbnail = info.thumbnail;
     let artistImage = info.artist_image;
-    
+
     if (thumbnail && thumbnail.startsWith('/proxy_image')) {
         thumbnail = API_BASE_URL + thumbnail;
     }
     if (artistImage && artistImage.startsWith('/proxy_image')) {
         artistImage = API_BASE_URL + artistImage;
     }
-    
+
     const cardHtml = `
     <div class="video-card">
         <div class="thumbnail-container ${['tiktok', 'instagram'].includes(platformId) ? 'portrait' : ''} ${platformId === 'spotify' ? 'spotify' : ''}">
@@ -238,19 +244,19 @@ function startDownload(url, type, quality, fmt) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
     })
-    .then(r => r.json())
-    .then(data => {
-        if (data.error) {
-            handleDownloadError(data.error);
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                handleDownloadError(data.error);
+                updateDlCounter();
+                return;
+            }
             updateDlCounter();
-            return;
-        }
-        updateDlCounter();
-        pollProgress(data.task_id);
-    })
-    .catch(err => {
-        handleDownloadError('Failed to start download.');
-    });
+            pollProgress(data.task_id);
+        })
+        .catch(err => {
+            handleDownloadError('Failed to start download.');
+        });
 }
 
 function startSpotifyDownload(url, fmt) {
@@ -277,19 +283,19 @@ function startSpotifyDownload(url, fmt) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
     })
-    .then(r => r.json())
-    .then(data => {
-        if (data.error) {
-            handleDownloadError(data.error);
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                handleDownloadError(data.error);
+                updateDlCounter();
+                return;
+            }
             updateDlCounter();
-            return;
-        }
-        updateDlCounter();
-        pollProgress(data.task_id);
-    })
-    .catch(err => {
-        handleDownloadError('Failed to start Spotify download.');
-    });
+            pollProgress(data.task_id);
+        })
+        .catch(err => {
+            handleDownloadError('Failed to start Spotify download.');
+        });
 }
 
 function showProgressOverlay(type, fmt, isSpotify = false) {
@@ -301,7 +307,7 @@ function showProgressOverlay(type, fmt, isSpotify = false) {
     const bar = document.getElementById('dlBar');
     const percent = document.getElementById('dlPercent');
     const msg = document.getElementById('dlMsg');
-    
+
     // Reset state
     bar.style.width = '0%';
     percent.textContent = '0%';
@@ -378,7 +384,7 @@ function pollProgress(taskId) {
                     setTimeout(function () {
                         // For the download link, we also need to point to the backend
                         const downloadUrl = `${API_BASE_URL}/download_file/${taskId}`;
-                        
+
                         // Create invisible iframe or link to trigger download
                         const a = document.createElement('a');
                         a.href = downloadUrl;
@@ -386,7 +392,7 @@ function pollProgress(taskId) {
                         document.body.appendChild(a);
                         a.click();
                         document.body.removeChild(a);
-                        
+
                         setTimeout(function () {
                             overlay.classList.remove('active');
                         }, 2000);

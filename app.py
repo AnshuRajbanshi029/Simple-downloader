@@ -991,6 +991,9 @@ def _score_spotify_candidate(track_title, track_artists, target_dur_s, candidate
         source_bonus = 0.02
 
     score = (title_similarity * 0.60) + (artist_cov * 0.30) + (duration_score * 0.10) + source_bonus
+    
+    print(f"[DEBUG] Candidate: '{title}' | Score: {score:.2f} | TitleSim: {title_similarity:.2f} | ArtistCov: {artist_cov:.2f} | DurDiff: {duration_diff}s")
+    
     return score, duration_diff
 
 
@@ -1620,6 +1623,8 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
                 # Phase 1: Search YouTube for the track
                 task['message'] = 'Extracting audio configuration…'
                 search_query = f"ytsearch10:{track_artist} - {track_title} audio"
+                print(f"[DEBUG] Searching YouTube with query: '{search_query}'")
+                
                 ydl_opts_search = {
                     'proxy': f"http://{proxy}",
                     'quiet': True,
@@ -1630,6 +1635,7 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
                 with yt_dlp.YoutubeDL(ydl_opts_search) as ydl:
                     results = ydl.extract_info(search_query, download=False)
                     entries = results.get('entries', [])
+                    print(f"[DEBUG] Found {len(entries)} results for query.")
 
                 # Phase 2: Find the best match
                 candidates = []
@@ -1640,10 +1646,13 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
                         candidates.append((res[0], entry['url']))
 
                 if not candidates:
+                    print(f"[DEBUG] No suitable candidates found for '{track_title}' by '{track_artist}'")
                     shutil.rmtree(tmpdir, ignore_errors=True)
                     continue # Try next proxy or finish loop
 
-                best_url = sorted(candidates, key=lambda x: x[0], reverse=True)[0][1]
+                best_match = sorted(candidates, key=lambda x: x[0], reverse=True)[0]
+                best_url = best_match[1]
+                print(f"[DEBUG] Selected best match with score {best_match[0]:.2f}: {best_url}")
 
                 # Phase 3: Download the best match
                 def _progress_hook(d):
