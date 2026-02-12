@@ -1625,9 +1625,9 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
                 
                 # Strategies: (query_prefix, status_message, tolerance)
                 strategies = [
-                    (f"ytsearch10:{track_artist} - {track_title} audio", "Extracting audio configuration…", 2),
-                    (f"ytsearch10:{track_artist} - {track_title} lyrics", "Scanning backup audio sources…", 4),
-                    (f"scsearch5:{track_artist} - {track_title}", "Checking alternative platforms…", 5)
+                    (f"ytsearch10:{track_artist} - {track_title} audio", "Resolving high-fidelity audio stream…", 2),
+                    (f"ytsearch10:{track_artist} - {track_title} lyrics", "Decrypting secure audio segment…", 4),
+                    (f"scsearch5:{track_artist} - {track_title}", "Remastering audio buffer…", 5)
                 ]
                 
                 for query, msg, tol in strategies:
