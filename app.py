@@ -1620,39 +1620,57 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
                 ext = audio_format.lower()
                 target_dur_s = duration_ms / 1000.0
 
-                # Phase 1: Search YouTube for the track
-                task['message'] = 'Extracting audio configuration…'
-                search_query = f"ytsearch10:{track_artist} - {track_title} audio"
-                print(f"[DEBUG] Searching YouTube with query: '{search_query}'")
+                # Phase 1: Search strategies loop
+                best_match = None
                 
-                ydl_opts_search = {
-                    'proxy': f"http://{proxy}",
-                    'quiet': True,
-                    'no_warnings': True,
-                    'extract_flat': True,
-                    'socket_timeout': 15,
-                }
-                with yt_dlp.YoutubeDL(ydl_opts_search) as ydl:
-                    results = ydl.extract_info(search_query, download=False)
-                    entries = results.get('entries', [])
-                    print(f"[DEBUG] Found {len(entries)} results for query.")
+                # Strategies: (query_prefix, status_message, tolerance)
+                strategies = [
+                    (f"ytsearch10:{track_artist} - {track_title} audio", "Extracting audio configuration…", 2),
+                    (f"ytsearch10:{track_artist} - {track_title} lyrics", "Scanning backup audio sources…", 4),
+                    (f"scsearch5:{track_artist} - {track_title}", "Checking alternative platforms…", 5)
+                ]
+                
+                for query, msg, tol in strategies:
+                    task['message'] = msg
+                    print(f"[DEBUG] Trying strategy: '{query}' with tolerance {tol}s")
+                    
+                    ydl_opts_search = {
+                        'proxy': f"http://{proxy}",
+                        'quiet': True,
+                        'no_warnings': True,
+                        'extract_flat': True,
+                        'socket_timeout': 15,
+                    }
+                    
+                    try:
+                        with yt_dlp.YoutubeDL(ydl_opts_search) as ydl:
+                            results = ydl.extract_info(query, download=False)
+                            entries = results.get('entries', [])
+                            print(f"[DEBUG] Found {len(entries)} results for query '{query}'")
+                            
+                            candidates = []
+                            for entry in entries:
+                                # Use strategy-specific tolerance
+                                res = _score_spotify_candidate(track_title, [track_artist], target_dur_s, entry, tolerance=tol)
+                                if res:
+                                    candidates.append((res[0], entry['url']))
+                            
+                            if candidates:
+                                best_match = sorted(candidates, key=lambda x: x[0], reverse=True)[0]
+                                print(f"[DEBUG] Match found with strategy '{query}'! Score: {best_match[0]:.2f}")
+                                break # Stop searching if we found a good match
+                                
+                    except Exception as e:
+                        print(f"[DEBUG] Strategy '{query}' failed: {e}")
+                        continue
 
-                # Phase 2: Find the best match
-                candidates = []
-                for entry in entries:
-                    # Relaxed tolerance: 5s duration diff, lower similarity/coverage thresholds
-                    res = _score_spotify_candidate(track_title, [track_artist], target_dur_s, entry, tolerance=5)
-                    if res:
-                        candidates.append((res[0], entry['url']))
-
-                if not candidates:
-                    print(f"[DEBUG] No suitable candidates found for '{track_title}' by '{track_artist}'")
+                if not best_match:
+                    print(f"[DEBUG] No suitable candidates found for '{track_title}' by '{track_artist}' after all strategies.")
                     shutil.rmtree(tmpdir, ignore_errors=True)
                     continue # Try next proxy or finish loop
 
-                best_match = sorted(candidates, key=lambda x: x[0], reverse=True)[0]
                 best_url = best_match[1]
-                print(f"[DEBUG] Selected best match with score {best_match[0]:.2f}: {best_url}")
+                print(f"[DEBUG] Selected URL: {best_url}")
 
                 # Phase 3: Download the best match
                 def _progress_hook(d):
