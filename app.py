@@ -389,10 +389,7 @@ def get_instagram_user_avatar(user_id):
                     all_402 = False
                 continue
         
-        if all_402:
-            rotate_proxy_group()
-        else:
-            break
+        break
 
     return None
 
@@ -1836,10 +1833,7 @@ def proxy_image():
                     all_402 = False
                 continue
         
-        if all_402:
-            rotate_proxy_group()
-        else:
-            break
+        break
 
     # Final fallback without proxy
     try:
@@ -1920,10 +1914,7 @@ def get_formats():
                     all_402 = False
                 continue
         
-        if all_402:
-            rotate_proxy_group()
-        else:
-            break
+        break
             
     return {'best_quality': 'HD', 'worst_quality': 'SD'}
 
