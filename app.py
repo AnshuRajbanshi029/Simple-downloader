@@ -1203,9 +1203,158 @@ def get_spotify_metadata(track_url):
     return result
 
 
-@app.route('/', methods=['GET'])
+@app.route('/', methods=['GET', 'POST'])
 def index():
-    return render_template('index.html', platforms=PLATFORMS, downloads_remaining=downloads_remaining())
+    video_info = None
+    error = None
+    url = None
+    platform_id = None
+    
+    if request.method == 'POST':
+        url = request.form.get('url')
+        if url:
+            try:
+                video_info, platform_id = resolve_video_data(url)
+            except Exception as e:
+                error = str(e)
+        else:
+            error = "Please enter a URL"
+
+    return render_template('index.html', 
+                           platforms=PLATFORMS, 
+                           downloads_remaining=downloads_remaining(),
+                           video_info=video_info,
+                           error=error,
+                           url=url,
+                           platform_id=platform_id,
+                           platform=PLATFORMS.get(platform_id))
+
+
+def resolve_video_data(video_url):
+    """Core logic to resolve video metadata for any platform."""
+    platform_id, platform_config = detect_platform(video_url)
+    
+    if platform_id == 'spotify':
+        info = get_spotify_metadata(video_url)
+    else:
+        info = extract_video_info(video_url)
+        
+    info['platform'] = platform_id
+    # Pass config back so frontend knows color/name
+    info['platform_config'] = platform_config
+
+    if platform_id == 'tiktok' and not info.get('artist_image'):
+        avatar = (
+            info.get('uploader_avatar')
+            or info.get('uploader_avatar_url')
+            or info.get('uploader_thumbnail')
+            or info.get('avatar')
+        )
+        if not avatar:
+            profile_url = info.get('uploader_url')
+            if not profile_url:
+                uploader_id = info.get('uploader_id') or info.get('uploader')
+                if uploader_id:
+                    profile_url = f"https://www.tiktok.com/@{uploader_id}"
+            if not profile_url:
+                webpage_url = info.get('webpage_url')
+                if webpage_url:
+                    match = re.search(r'tiktok\.com/@([^/?]+)', webpage_url)
+                    if match:
+                        profile_url = f"https://www.tiktok.com/@{match.group(1)}"
+            avatar = get_tiktok_profile_avatar(profile_url)
+
+        if avatar:
+            info['artist_image'] = avatar
+
+    if platform_id == 'tiktok':
+        duration_display = _format_duration_seconds(info.get('duration'))
+        if duration_display:
+            info['duration_display'] = duration_display
+
+    if platform_id == 'facebook':
+        if not info.get('artist_image'):
+            avatar = (
+                info.get('uploader_avatar')
+                or info.get('uploader_avatar_url')
+                or info.get('uploader_thumbnail')
+                or info.get('avatar')
+            )
+            if not avatar:
+                # ── PRIMARY: Graph API (fast & reliable for Pages) ──
+                avatar = get_facebook_avatar_via_graph_api(
+                    uploader_id=info.get('uploader_id'),
+                    webpage_url=info.get('webpage_url'),
+                )
+            if not avatar:
+                # ── FALLBACK: HTML-scrape the video page ──
+                video_page = info.get('webpage_url') or info.get('url')
+                avatar = get_facebook_profile_avatar(video_page)
+
+            if avatar:
+                info['artist_image'] = avatar
+
+        duration_display = _format_duration_seconds(info.get('duration'))
+        if duration_display:
+            info['duration_display'] = duration_display
+
+        if info.get('artist_image') and _should_proxy_image(info['artist_image']):
+            from urllib.parse import quote as _url_quote
+            info['artist_image'] = (
+                '/proxy_image?url=' + _url_quote(info['artist_image'], safe='')
+            )
+
+    if platform_id == 'instagram':
+        if not info.get('thumbnail'):
+            info['thumbnail'] = _pick_best_thumbnail(info.get('thumbnails', []))
+
+        # ── Avatar: fetch via Instagram's internal user API ──
+        if not info.get('artist_image'):
+            avatar = (
+                info.get('uploader_avatar')
+                or info.get('uploader_avatar_url')
+                or info.get('uploader_thumbnail')
+                or info.get('avatar')
+            )
+            if not avatar:
+                # yt_dlp's uploader_id is the numeric user ID
+                avatar = get_instagram_user_avatar(
+                    info.get('uploader_id')
+                )
+
+            if avatar:
+                info['artist_image'] = avatar
+
+        # ── Proxy Instagram CDN images through our server ──
+        # Instagram CDN URLs can be geo-blocked or expire for
+        # direct browser requests, so we proxy them to be safe.
+        from urllib.parse import quote as _url_quote
+        if info.get('artist_image') and _should_proxy_image(info['artist_image']):
+            info['artist_image'] = (
+                '/proxy_image?url=' + _url_quote(info['artist_image'], safe='')
+            )
+        if info.get('thumbnail') and _should_proxy_image(info['thumbnail']):
+            info['thumbnail'] = (
+                '/proxy_image?url=' + _url_quote(info['thumbnail'], safe='')
+            )
+
+        duration_display = _format_duration_seconds(info.get('duration'))
+        if duration_display:
+            info['duration_display'] = duration_display
+
+    if platform_id != 'spotify':
+        best_label, worst_label = _get_quality_labels(info.get('formats', []))
+        info['best_quality_label'] = best_label
+        info['worst_quality_label'] = worst_label
+
+        # Ensure every non-Spotify platform has a formatted duration (mm:ss)
+        if not info.get('duration_display'):
+            duration_display = _format_duration_seconds(info.get('duration'))
+            if duration_display:
+                info['duration_display'] = duration_display
+    
+    return info, platform_id
+
 
 @app.route('/api/resolve', methods=['POST'])
 def api_resolve():
@@ -1215,129 +1364,8 @@ def api_resolve():
         return jsonify({'error': "Please enter a URL"}), 400
     
     try:
-        platform_id, platform_config = detect_platform(video_url)
-        
-        if platform_id == 'spotify':
-            info = get_spotify_metadata(video_url)
-        else:
-            info = extract_video_info(video_url)
-            
-        info['platform'] = platform_id
-        # Pass config back so frontend knows color/name
-        info['platform_config'] = platform_config
-
-        if platform_id == 'tiktok' and not info.get('artist_image'):
-            avatar = (
-                info.get('uploader_avatar')
-                or info.get('uploader_avatar_url')
-                or info.get('uploader_thumbnail')
-                or info.get('avatar')
-            )
-            if not avatar:
-                profile_url = info.get('uploader_url')
-                if not profile_url:
-                    uploader_id = info.get('uploader_id') or info.get('uploader')
-                    if uploader_id:
-                        profile_url = f"https://www.tiktok.com/@{uploader_id}"
-                if not profile_url:
-                    webpage_url = info.get('webpage_url')
-                    if webpage_url:
-                        match = re.search(r'tiktok\.com/@([^/?]+)', webpage_url)
-                        if match:
-                            profile_url = f"https://www.tiktok.com/@{match.group(1)}"
-                avatar = get_tiktok_profile_avatar(profile_url)
-
-            if avatar:
-                info['artist_image'] = avatar
-
-        if platform_id == 'tiktok':
-            duration_display = _format_duration_seconds(info.get('duration'))
-            if duration_display:
-                info['duration_display'] = duration_display
-
-        if platform_id == 'facebook':
-            if not info.get('artist_image'):
-                avatar = (
-                    info.get('uploader_avatar')
-                    or info.get('uploader_avatar_url')
-                    or info.get('uploader_thumbnail')
-                    or info.get('avatar')
-                )
-                if not avatar:
-                    # ── PRIMARY: Graph API (fast & reliable for Pages) ──
-                    avatar = get_facebook_avatar_via_graph_api(
-                        uploader_id=info.get('uploader_id'),
-                        webpage_url=info.get('webpage_url'),
-                    )
-                if not avatar:
-                    # ── FALLBACK: HTML-scrape the video page ──
-                    video_page = info.get('webpage_url') or info.get('url')
-                    avatar = get_facebook_profile_avatar(video_page)
-
-                if avatar:
-                    info['artist_image'] = avatar
-
-            duration_display = _format_duration_seconds(info.get('duration'))
-            if duration_display:
-                info['duration_display'] = duration_display
-
-            if info.get('artist_image') and _should_proxy_image(info['artist_image']):
-                from urllib.parse import quote as _url_quote
-                info['artist_image'] = (
-                    '/proxy_image?url=' + _url_quote(info['artist_image'], safe='')
-                )
-
-        if platform_id == 'instagram':
-            if not info.get('thumbnail'):
-                info['thumbnail'] = _pick_best_thumbnail(info.get('thumbnails', []))
-
-            # ── Avatar: fetch via Instagram's internal user API ──
-            if not info.get('artist_image'):
-                avatar = (
-                    info.get('uploader_avatar')
-                    or info.get('uploader_avatar_url')
-                    or info.get('uploader_thumbnail')
-                    or info.get('avatar')
-                )
-                if not avatar:
-                    # yt_dlp's uploader_id is the numeric user ID
-                    avatar = get_instagram_user_avatar(
-                        info.get('uploader_id')
-                    )
-
-                if avatar:
-                    info['artist_image'] = avatar
-
-            # ── Proxy Instagram CDN images through our server ──
-            # Instagram CDN URLs can be geo-blocked or expire for
-            # direct browser requests, so we proxy them to be safe.
-            from urllib.parse import quote as _url_quote
-            if info.get('artist_image') and _should_proxy_image(info['artist_image']):
-                info['artist_image'] = (
-                    '/proxy_image?url=' + _url_quote(info['artist_image'], safe='')
-                )
-            if info.get('thumbnail') and _should_proxy_image(info['thumbnail']):
-                info['thumbnail'] = (
-                    '/proxy_image?url=' + _url_quote(info['thumbnail'], safe='')
-                )
-
-            duration_display = _format_duration_seconds(info.get('duration'))
-            if duration_display:
-                info['duration_display'] = duration_display
-
-        if platform_id != 'spotify':
-            best_label, worst_label = _get_quality_labels(info.get('formats', []))
-            info['best_quality_label'] = best_label
-            info['worst_quality_label'] = worst_label
-
-            # Ensure every non-Spotify platform has a formatted duration (mm:ss)
-            if not info.get('duration_display'):
-                duration_display = _format_duration_seconds(info.get('duration'))
-                if duration_display:
-                    info['duration_display'] = duration_display
-        
+        info, _ = resolve_video_data(video_url)
         return jsonify(info)
-
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
