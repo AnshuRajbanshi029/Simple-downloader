@@ -152,22 +152,12 @@ def _load_proxies_from_file(file_name):
         print(f"Error loading {file_name}: {e}")
     return []
 
-def get_current_proxies():
-    """Returns the list of proxies from the current active .txtN file."""
-    with _proxy_file_lock:
-        return _load_proxies_from_file(PROXY_FILES[_current_proxy_index])
-
-def rotate_proxy_group():
-    """Switches to the next proxy text file group."""
-    global _current_proxy_index, PROXIES
-    with _proxy_file_lock:
-        _current_proxy_index = (_current_proxy_index + 1) % len(PROXY_FILES)
-        next_file = PROXY_FILES[_current_proxy_index]
-        print(f"Rotating to proxy group: {next_file}")
-        new_proxies = _load_proxies_from_file(next_file)
-        if new_proxies:
-            PROXIES = new_proxies
-        return PROXIES
+def get_all_proxies():
+    """Returns a combined list of all proxies from all .txtN files."""
+    all_proxies = []
+    for file_name in PROXY_FILES:
+        all_proxies.extend(_load_proxies_from_file(file_name))
+    return all_proxies
 
 # Initial proxy list for global use (backwards compatibility)
 PROXIES = get_current_proxies()
@@ -264,34 +254,23 @@ def _fetch_html_with_proxies(url):
         "Referer": "https://www.google.com/"
     }
     
-    # Try current group, rotate if needed
-    for attempt in range(2):
-        shuffled_proxies = get_current_proxies()
-        random.shuffle(shuffled_proxies)
-        all_402 = True
+    # Try all available proxies from all groups
+    all_proxies = get_all_proxies()
+    random.shuffle(all_proxies)
 
-        for proxy in shuffled_proxies:
-            try:
-                proxy_url = f"http://{proxy}"
-                response = requests.get(
-                    url,
-                    headers=headers,
-                    proxies={'http': proxy_url, 'https': proxy_url},
-                    timeout=15
-                )
-                if response.status_code == 200:
-                    return response.text
-                if response.status_code != 402:
-                    all_402 = False
-            except Exception as e:
-                if "402" not in str(e):
-                    all_402 = False
-                continue
-        
-        if all_402:
-            rotate_proxy_group()
-        else:
-            break # Stop if it's not a general group failure
+    for proxy in all_proxies:
+        try:
+            proxy_url = f"http://{proxy}"
+            response = requests.get(
+                url,
+                headers=headers,
+                proxies={'http': proxy_url, 'https': proxy_url},
+                timeout=15
+            )
+            if response.status_code == 200:
+                return response.text
+        except Exception:
+            continue
             
     return None
 
@@ -606,52 +585,45 @@ def _should_proxy_image(url):
 
 
 def extract_video_info(video_url):
-    """Try all proxies until one succeeds, rotating groups on 402 errors."""
+    """Try all proxies across all available groups until one succeeds."""
     last_error = None
     
-    for attempt in range(2):
-        shuffled_proxies = get_current_proxies()
-        random.shuffle(shuffled_proxies)
-        all_402 = True
-        
-        for proxy in shuffled_proxies:
-            try:
-                ydl_opts = {
-                    'format': 'best',
-                    'proxy': f"http://{proxy}",
-                    'quiet': True,
-                    'no_warnings': True,
-                    'noplaylist': True,
-                    'socket_timeout': 20,
-                    'extractor_args': {'youtube': {'player_client': ['ios,web']}},
-                }
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(video_url, download=False)
-                    
-                    # Try to get channel avatar for YouTube videos
-                    channel_id = info.get('channel_id')
-                    if channel_id and not info.get('artist_image'):
-                        avatar = get_youtube_channel_avatar(channel_id)
-                        if avatar:
-                            info['artist_image'] = avatar
-                    
-                    return info  # Success!
-            except Exception as e:
-                last_error = e
-                # Check for "402 Payment Required" in the error message
-                if "402 Payment Required" not in str(e):
-                    all_402 = False
-                continue
-        
-        # If all 10 proxies in the group failed with 402, rotate group and retry once
-        if all_402:
-            print("All proxies in current group failed with 402 Payment Required. Rotating group...")
-            rotate_proxy_group()
-        else:
-            break # Not a group-wide 402 failure, stop retrying groups
+    # Get all 40 proxies (10 per file x 4 files)
+    all_proxies = get_all_proxies()
+    random.shuffle(all_proxies)
     
-    # All attempts failed
-    raise last_error if last_error else Exception("All proxies failed")
+    print(f"Attempting to extract video info using {len(all_proxies)} available proxies...")
+    
+    for proxy in all_proxies:
+        try:
+            ydl_opts = {
+                'format': 'best',
+                'proxy': f"http://{proxy}",
+                'quiet': True,
+                'no_warnings': True,
+                'noplaylist': True,
+                'socket_timeout': 20,
+                'extractor_args': {'youtube': {'player_client': ['ios,web']}},
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(video_url, download=False)
+                
+                # Try to get channel avatar for YouTube videos
+                channel_id = info.get('channel_id')
+                if channel_id and not info.get('artist_image'):
+                    avatar = get_youtube_channel_avatar(channel_id)
+                    if avatar:
+                        info['artist_image'] = avatar
+                
+                return info  # Success!
+        except Exception as e:
+            last_error = e
+            # Log the error and move to next proxy regardless of error type
+            print(f"Proxy {proxy} failed: {str(e).splitlines()[0] if str(e) else 'Unknown error'}")
+            continue
+    
+    # All 40 proxies failed
+    raise last_error if last_error else Exception("All 40 proxies failed to extract video info")
 
 spotify_token_cache = {
     'access_token': None,
