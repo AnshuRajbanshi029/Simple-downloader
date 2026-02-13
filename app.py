@@ -582,45 +582,54 @@ def _should_proxy_image(url):
 
 
 def extract_video_info(video_url):
-    """Try all proxies across all available groups until one succeeds."""
+    """Try a subset of proxies (10) up to 2 times each until one succeeds."""
     last_error = None
     
-    # Get all 40 proxies (10 per file x 4 files)
+    # Get all proxies
     all_proxies = get_all_proxies()
-    random.shuffle(all_proxies)
     
-    print(f"Attempting to extract video info using {len(all_proxies)} available proxies...")
+    # Pick up to 10 random proxies
+    k = min(len(all_proxies), 10)
+    selected_proxies = random.sample(all_proxies, k) if k > 0 else []
     
-    for proxy in all_proxies:
-        try:
-            ydl_opts = {
-                'format': 'best',
-                'proxy': f"http://{proxy}",
-                'quiet': True,
-                'no_warnings': True,
-                'noplaylist': True,
-                'socket_timeout': 20,
-                'extractor_args': {'youtube': {'player_client': ['ios,web']}},
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(video_url, download=False)
-                
-                # Try to get channel avatar for YouTube videos
-                channel_id = info.get('channel_id')
-                if channel_id and not info.get('artist_image'):
-                    avatar = get_youtube_channel_avatar(channel_id)
-                    if avatar:
-                        info['artist_image'] = avatar
-                
-                return info  # Success!
-        except Exception as e:
-            last_error = e
-            # Log the error and move to next proxy regardless of error type
-            print(f"Proxy {proxy} failed: {str(e).splitlines()[0] if str(e) else 'Unknown error'}")
-            continue
+    print(f"Attempting to extract video info using {len(selected_proxies)} proxies (2 attempts)...")
     
-    # All 40 proxies failed
-    raise last_error if last_error else Exception("All 40 proxies failed to extract video info")
+    for attempt in range(2):
+        # Shuffle again for the second attempt to vary order? Or keep same?
+        # User said "10 proxies 2 times". We'll iterate the same set.
+        # Maybe shuffle within the set for randomness.
+        random.shuffle(selected_proxies)
+        
+        for proxy in selected_proxies:
+            try:
+                ydl_opts = {
+                    'format': 'best',
+                    'proxy': f"http://{proxy}",
+                    'quiet': True,
+                    'no_warnings': True,
+                    'noplaylist': True,
+                    'socket_timeout': 10,  # Reduced from 20 to avoid worker timeout
+                    'extractor_args': {'youtube': {'player_client': ['ios,web']}},
+                }
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(video_url, download=False)
+                    
+                    # Try to get channel avatar for YouTube videos
+                    channel_id = info.get('channel_id')
+                    if channel_id and not info.get('artist_image'):
+                        avatar = get_youtube_channel_avatar(channel_id)
+                        if avatar:
+                            info['artist_image'] = avatar
+                    
+                    return info  # Success!
+            except Exception as e:
+                last_error = e
+                # Log the error and move to next proxy
+                print(f"Proxy {proxy} (Attempt {attempt+1}) failed: {str(e).splitlines()[0] if str(e) else 'Unknown error'}")
+                continue
+    
+    # All attempts failed
+    raise last_error if last_error else Exception("All selected proxies failed to extract video info")
 
 spotify_token_cache = {
     'access_token': None,
