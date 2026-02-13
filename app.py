@@ -588,28 +588,44 @@ def extract_video_info(video_url):
     # Get all proxies
     all_proxies = get_all_proxies()
     
-    # Pick up to 10 random proxies
+    # Pick up to 10 random proxies (fit within 120s timeout: 10 * 2 * 5s = 100s)
     k = min(len(all_proxies), 10)
     selected_proxies = random.sample(all_proxies, k) if k > 0 else []
     
     print(f"Attempting to extract video info using {len(selected_proxies)} proxies (2 attempts)...")
     
+    # Rotate user agents to avoid bot detection
+    user_agents = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    ]
+
     for attempt in range(2):
-        # Shuffle again for the second attempt to vary order? Or keep same?
-        # User said "10 proxies 2 times". We'll iterate the same set.
-        # Maybe shuffle within the set for randomness.
+        # Shuffle again for the second attempt to vary order
         random.shuffle(selected_proxies)
         
         for proxy in selected_proxies:
             try:
+                # Rotate user agent
+                ua = random.choice(user_agents)
+                
                 ydl_opts = {
                     'format': 'best',
                     'proxy': f"http://{proxy}",
                     'quiet': True,
                     'no_warnings': True,
                     'noplaylist': True,
-                    'socket_timeout': 10,  # Reduced from 20 to avoid worker timeout
-                    'extractor_args': {'youtube': {'player_client': ['ios,web']}},
+                    'socket_timeout': 5,   # Reduced to 5s to prevent worker timeout
+                    'retries': 0,          # Do not retry internally
+                    'http_headers': {'User-Agent': ua},
+                    # Rotate clients to bypass "Sign in" check
+                    'extractor_args': {
+                        'youtube': {
+                            'player_client': [random.choice(['android', 'ios', 'web', 'tv', 'mweb'])]
+                        }
+                    },
                 }
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(video_url, download=False)
