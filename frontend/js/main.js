@@ -336,28 +336,20 @@ function startDownload(url, type, quality, fmt) {
 }
 
 function startSpotifyDownload(fmt) {
-    // Use the dedicated download URL from the Spotify Scraper API if available
-    let downloadUrl = (fmt === 'wav') ? window._spotifyDownloadUrlWav : window._spotifyDownloadUrl;
+    const title = window._spotifyTrackTitle || '';
+    const artist = window._spotifyTrackArtist || '';
+    const durationMs = window._spotifyDurationMs || 0;
 
-    if (!downloadUrl) {
-        // Fallback: build the URL manually from stored metadata
-        const title = window._spotifyTrackTitle || '';
-        const artist = window._spotifyTrackArtist || '';
-        const durationMs = window._spotifyDurationMs || 0;
-        if (title && artist) {
-            downloadUrl = `${SPOTIFY_API_BASE}/api/download?trackName=${encodeURIComponent(title)}&artistName=${encodeURIComponent(artist)}&durationMs=${durationMs}&format=${fmt || 'mp3'}`;
-        }
-    }
-
-    if (!downloadUrl) {
-        showError('No download URL available for this track.');
+    if (!title || !artist) {
+        showError('No track info available for download.');
         return;
     }
 
-    console.log('[DEBUG] Spotify direct download:', downloadUrl);
+    const format = fmt || 'mp3';
+    console.log('[DEBUG] Spotify POST download:', { title, artist, durationMs, format });
 
-    // Show a quick overlay then trigger the direct download
-    showProgressOverlay('audio', fmt, true);
+    // Show progress overlay
+    showProgressOverlay('audio', format, true);
     const bar = document.getElementById('dlBar');
     const percent = document.getElementById('dlPercent');
     const msg = document.getElementById('dlMsg');
@@ -366,29 +358,64 @@ function startSpotifyDownload(fmt) {
     const stepDone = document.getElementById('stepDone');
     const overlay = document.getElementById('dlProgressOverlay');
 
-    // Simulate quick progress since the API streams directly
     msg.textContent = 'Connecting to server…';
-    setTimeout(() => {
-        bar.style.width = '50%';
-        percent.textContent = '50%';
-        msg.textContent = 'Starting download…';
-        stepDl.className = 'dl-step active';
-    }, 300);
+    bar.style.width = '20%';
+    percent.textContent = '20%';
 
-    setTimeout(() => {
-        bar.style.width = '100%';
-        percent.textContent = '100%';
-        stepDl.className = 'dl-step completed';
-        stepMrg.className = 'dl-step completed';
-        stepDone.className = 'dl-step active';
-        msg.textContent = 'Your download should start shortly!';
+    // The API requires a POST with JSON body
+    fetch(`${SPOTIFY_API_BASE}/api/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            trackName: title,
+            artistName: artist,
+            durationMs: durationMs,
+            format: format
+        })
+    })
+        .then(response => {
+            if (!response.ok) {
+                return response.text().then(t => { throw new Error(t || 'Download failed'); });
+            }
+            msg.textContent = 'Downloading audio…';
+            bar.style.width = '50%';
+            percent.textContent = '50%';
+            stepDl.className = 'dl-step active';
+            return response.blob();
+        })
+        .then(blob => {
+            bar.style.width = '90%';
+            percent.textContent = '90%';
+            msg.textContent = 'Preparing file…';
+            stepDl.className = 'dl-step completed';
+            stepMrg.className = 'dl-step active';
 
-        // Use window.open for cross-origin streaming downloads
-        // The API sets Content-Disposition: attachment so the browser will download it
-        window.open(downloadUrl, '_blank');
+            // Create a blob URL and trigger download
+            const blobUrl = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            const safeTitle = (title + ' - ' + artist).replace(/[^a-zA-Z0-9 \-_]/g, '');
+            a.href = blobUrl;
+            a.download = `${safeTitle}.${format}`;
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(blobUrl);
 
-        setTimeout(() => { overlay.classList.remove('active'); }, 2500);
-    }, 800);
+            bar.style.width = '100%';
+            percent.textContent = '100%';
+            stepMrg.className = 'dl-step completed';
+            stepDone.className = 'dl-step active';
+            msg.textContent = 'Download complete!';
+
+            setTimeout(() => { overlay.classList.remove('active'); }, 2500);
+        })
+        .catch(err => {
+            console.error('[DEBUG] Spotify download error:', err);
+            msg.textContent = 'Download failed — ' + (err.message || 'please try again.');
+            msg.classList.add('dl-progress-error');
+            setTimeout(() => { overlay.classList.remove('active'); }, 4000);
+        });
 }
 
 function showProgressOverlay(type, fmt, isSpotify = false) {
