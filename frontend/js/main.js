@@ -117,8 +117,9 @@ function resolveSpotify(spotifyUrl) {
                 is_spotify: true,
                 platform: 'spotify',
                 platform_config: { name: 'Spotify', color: '#1DB954', icon: '🎵' },
-                // Store the download URL from the API for direct streaming
+                // Store the download URLs from the API for direct streaming
                 spotify_download_url: track.download_url || '',
+                spotify_download_url_wav: track.download_url_wav || '',
                 // Preview URL as fallback
                 spotify_preview_url: track.preview_url || raw.preview?.audio || '',
             };
@@ -185,8 +186,9 @@ function renderVideoCard(info, originalUrl) {
     let downloadOptionsHtml = '';
 
     if (info.is_spotify) {
-        // Store download URL in a global so the button handler can access it
+        // Store download URLs in globals so the button handler can access them
         window._spotifyDownloadUrl = info.spotify_download_url || '';
+        window._spotifyDownloadUrlWav = info.spotify_download_url_wav || '';
         window._spotifyTrackTitle = info.title || '';
         window._spotifyTrackArtist = info.uploader || '';
         window._spotifyDurationMs = info.duration_ms || 0;
@@ -194,6 +196,7 @@ function renderVideoCard(info, originalUrl) {
         downloadOptionsHtml = `
         <div class="download-options" id="spotifyDownloadOptions"
              data-download-url="${escapeHtml(info.spotify_download_url || '')}"
+             data-download-url-wav="${escapeHtml(info.spotify_download_url_wav || '')}"
              data-title="${escapeHtml(info.title || '')}"
              data-artist="${escapeHtml(info.uploader || '')}" 
              data-duration-ms="${info.duration_ms || 0}">
@@ -333,8 +336,8 @@ function startDownload(url, type, quality, fmt) {
 }
 
 function startSpotifyDownload(fmt) {
-    // Use the download URL from the Spotify Scraper API directly
-    let downloadUrl = window._spotifyDownloadUrl || '';
+    // Use the dedicated download URL from the Spotify Scraper API if available
+    let downloadUrl = (fmt === 'wav') ? window._spotifyDownloadUrlWav : window._spotifyDownloadUrl;
 
     if (!downloadUrl) {
         // Fallback: build the URL manually from stored metadata
@@ -342,7 +345,7 @@ function startSpotifyDownload(fmt) {
         const artist = window._spotifyTrackArtist || '';
         const durationMs = window._spotifyDurationMs || 0;
         if (title && artist) {
-            downloadUrl = `${SPOTIFY_API_BASE}/api/download?trackName=${encodeURIComponent(title)}&artistName=${encodeURIComponent(artist)}&durationMs=${durationMs}`;
+            downloadUrl = `${SPOTIFY_API_BASE}/api/download?trackName=${encodeURIComponent(title)}&artistName=${encodeURIComponent(artist)}&durationMs=${durationMs}&format=${fmt || 'mp3'}`;
         }
     }
 
