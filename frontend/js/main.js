@@ -383,14 +383,9 @@ function startSpotifyDownload(fmt) {
         stepDone.className = 'dl-step active';
         msg.textContent = 'Your download should start shortly!';
 
-        // Trigger the actual download via hidden link
-        const a = document.createElement('a');
-        a.href = downloadUrl;
-        a.style.display = 'none';
-        a.setAttribute('download', '');
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        // Use window.open for cross-origin streaming downloads
+        // The API sets Content-Disposition: attachment so the browser will download it
+        window.open(downloadUrl, '_blank');
 
         setTimeout(() => { overlay.classList.remove('active'); }, 2500);
     }, 800);
