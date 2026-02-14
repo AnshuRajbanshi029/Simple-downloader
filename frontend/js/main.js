@@ -2,6 +2,9 @@
 // e.g. 'https://your-app-name.onrender.com'
 const API_BASE_URL = 'https://ayoo-a9it.onrender.com';
 
+// Spotify Scraper API — used for Spotify metadata + downloads
+const SPOTIFY_API_BASE = 'https://spotify-scraper.replit.app';
+
 document.addEventListener('DOMContentLoaded', function () {
     const form = document.getElementById('fetchForm');
     const loader = document.getElementById('loaderOverlay');
@@ -25,39 +28,102 @@ document.addEventListener('DOMContentLoaded', function () {
         errorBox.textContent = '';
         resultContainer.innerHTML = ''; // Clear previous results
 
-        const bodyVal = JSON.stringify({ url: url });
         console.log('[DEBUG] resolving URL:', url);
 
-        fetch(`${API_BASE_URL}/api/resolve`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: bodyVal
-        })
-            .then(response => response.json())
-            .then(data => {
-                console.log('[DEBUG] resolve response:', data);
-                loader.classList.remove('active');
-                submitBtn.disabled = false;
+        // Route Spotify URLs to the dedicated Scraper API
+        const isSpotify = /spotify\.com/i.test(url) || /open\.spotify/i.test(url);
 
-                if (data.error) {
-                    console.error('[DEBUG] API returned error:', data.error);
-                    showError(data.error);
-                } else {
-                    playSuccessTone();
-                    renderVideoCard(data, url);
-                }
+        if (isSpotify) {
+            resolveSpotify(url)
+                .then(data => {
+                    loader.classList.remove('active');
+                    submitBtn.disabled = false;
+                    if (data.error) {
+                        showError(data.error);
+                    } else {
+                        playSuccessTone();
+                        renderVideoCard(data, url);
+                    }
+                })
+                .catch(err => {
+                    console.error('[DEBUG] Spotify API error:', err);
+                    loader.classList.remove('active');
+                    submitBtn.disabled = false;
+                    showError('Failed to fetch Spotify info. Please try again.');
+                });
+        } else {
+            // Non-Spotify: use Render backend
+            fetch(`${API_BASE_URL}/api/resolve`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: url })
             })
-            .catch(err => {
-                console.error('[DEBUG] Fetch error:', err);
-                loader.classList.remove('active');
-                submitBtn.disabled = false;
-                showError('Network error or server unavailable.');
-                console.error(err);
-            });
+                .then(response => response.json())
+                .then(data => {
+                    console.log('[DEBUG] resolve response:', data);
+                    loader.classList.remove('active');
+                    submitBtn.disabled = false;
+                    if (data.error) {
+                        showError(data.error);
+                    } else {
+                        playSuccessTone();
+                        renderVideoCard(data, url);
+                    }
+                })
+                .catch(err => {
+                    console.error('[DEBUG] Fetch error:', err);
+                    loader.classList.remove('active');
+                    submitBtn.disabled = false;
+                    showError('Network error or server unavailable.');
+                });
+        }
     });
 });
+
+/* -------- Spotify Scraper API -------- */
+
+function resolveSpotify(spotifyUrl) {
+    const endpoint = `${SPOTIFY_API_BASE}/api/scrape?url=${encodeURIComponent(spotifyUrl)}`;
+    return fetch(endpoint)
+        .then(r => {
+            if (!r.ok) throw new Error('Spotify API returned ' + r.status);
+            return r.json();
+        })
+        .then(raw => {
+            console.log('[DEBUG] Spotify scraper raw:', raw);
+            // Normalise into the shape renderVideoCard() expects
+            const track = (raw.tracks && raw.tracks[0]) || {};
+            const artistName = (track.artists && track.artists[0] && track.artists[0].name) || raw.preview?.artist || 'Unknown';
+            const artistId = track.artists && track.artists[0] && track.artists[0].id;
+            const artistImg = (artistId && raw.artistImages && raw.artistImages[artistId]) || (track.artists && track.artists[0] && track.artists[0].image) || '';
+            const albumImages = (track.album && track.album.images) || [];
+            const bigAlbumArt = albumImages.reduce((best, img) => (img.width > (best.width || 0) ? img : best), {});
+
+            // Format duration
+            const durationMs = track.duration_ms || 0;
+            const totalSec = Math.floor(durationMs / 1000);
+            const mins = Math.floor(totalSec / 60);
+            const secs = totalSec % 60;
+            const durationDisplay = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+
+            return {
+                title: track.name || raw.preview?.title || 'Unknown Track',
+                uploader: artistName,
+                channel: artistName,
+                thumbnail: bigAlbumArt.url || raw.preview?.image || '',
+                artist_image: artistImg,
+                duration_display: durationDisplay,
+                duration_ms: durationMs,
+                is_spotify: true,
+                platform: 'spotify',
+                platform_config: { name: 'Spotify', color: '#1DB954', icon: '🎵' },
+                // Store the download URL from the API for direct streaming
+                spotify_download_url: track.download_url || '',
+                // Preview URL as fallback
+                spotify_preview_url: track.preview_url || raw.preview?.audio || '',
+            };
+        });
+}
 
 function showError(msg) {
     const errorBox = document.getElementById('errorBox');
@@ -119,20 +185,27 @@ function renderVideoCard(info, originalUrl) {
     let downloadOptionsHtml = '';
 
     if (info.is_spotify) {
+        // Store download URL in a global so the button handler can access it
+        window._spotifyDownloadUrl = info.spotify_download_url || '';
+        window._spotifyTrackTitle = info.title || '';
+        window._spotifyTrackArtist = info.uploader || '';
+        window._spotifyDurationMs = info.duration_ms || 0;
+
         downloadOptionsHtml = `
-        <div class="download-options" id="spotifyDownloadOptions" 
+        <div class="download-options" id="spotifyDownloadOptions"
+             data-download-url="${escapeHtml(info.spotify_download_url || '')}"
              data-title="${escapeHtml(info.title || '')}"
              data-artist="${escapeHtml(info.uploader || '')}" 
              data-duration-ms="${info.duration_ms || 0}">
             <div class="download-section" style="grid-column: 1 / -1;">
                 <div class="download-section-title">🎵 Spotify Audio Download</div>
                 <div class="download-btn-group">
-                    <a href="#" onclick="startSpotifyDownload('${originalUrl}', 'mp3'); return false;" class="btn-small btn-audio"
+                    <a href="#" onclick="startSpotifyDownload('mp3'); return false;" class="btn-small btn-audio"
                         style="background: linear-gradient(135deg, #1DB954, #1ed760); color: white;">
                         Download MP3
                         <span class="quality-label">.mp3</span>
                     </a>
-                    <a href="#" onclick="startSpotifyDownload('${originalUrl}', 'wav'); return false;"
+                    <a href="#" onclick="startSpotifyDownload('wav'); return false;"
                         class="btn-small btn-audio">
                         Download WAV
                         <span class="quality-label">.wav</span>
@@ -259,43 +332,65 @@ function startDownload(url, type, quality, fmt) {
         });
 }
 
-function startSpotifyDownload(url, fmt) {
-    const optsEl = document.getElementById('spotifyDownloadOptions');
-    if (!optsEl) return;
+function startSpotifyDownload(fmt) {
+    // Use the download URL from the Spotify Scraper API directly
+    let downloadUrl = window._spotifyDownloadUrl || '';
 
-    const trackTitle = optsEl.getAttribute('data-title') || '';
-    const trackArtist = optsEl.getAttribute('data-artist') || '';
-    const durationMs = parseInt(optsEl.getAttribute('data-duration-ms') || '0', 10);
+    if (!downloadUrl) {
+        // Fallback: build the URL manually from stored metadata
+        const title = window._spotifyTrackTitle || '';
+        const artist = window._spotifyTrackArtist || '';
+        const durationMs = window._spotifyDurationMs || 0;
+        if (title && artist) {
+            downloadUrl = `${SPOTIFY_API_BASE}/api/download?trackName=${encodeURIComponent(title)}&artistName=${encodeURIComponent(artist)}&durationMs=${durationMs}`;
+        }
+    }
 
+    if (!downloadUrl) {
+        showError('No download URL available for this track.');
+        return;
+    }
+
+    console.log('[DEBUG] Spotify direct download:', downloadUrl);
+
+    // Show a quick overlay then trigger the direct download
     showProgressOverlay('audio', fmt, true);
+    const bar = document.getElementById('dlBar');
+    const percent = document.getElementById('dlPercent');
+    const msg = document.getElementById('dlMsg');
+    const stepDl = document.getElementById('stepDownload');
+    const stepMrg = document.getElementById('stepMerge');
+    const stepDone = document.getElementById('stepDone');
+    const overlay = document.getElementById('dlProgressOverlay');
 
-    const body = {
-        url: url,
-        type: 'spotify',
-        format: fmt || 'mp3',
-        track_title: trackTitle,
-        track_artist: trackArtist,
-        duration_ms: durationMs
-    };
+    // Simulate quick progress since the API streams directly
+    msg.textContent = 'Connecting to server…';
+    setTimeout(() => {
+        bar.style.width = '50%';
+        percent.textContent = '50%';
+        msg.textContent = 'Starting download…';
+        stepDl.className = 'dl-step active';
+    }, 300);
 
-    fetch(`${API_BASE_URL}/download_start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-    })
-        .then(r => r.json())
-        .then(data => {
-            if (data.error) {
-                handleDownloadError(data.error);
-                updateDlCounter();
-                return;
-            }
-            updateDlCounter();
-            pollProgress(data.task_id);
-        })
-        .catch(err => {
-            handleDownloadError('Failed to start Spotify download.');
-        });
+    setTimeout(() => {
+        bar.style.width = '100%';
+        percent.textContent = '100%';
+        stepDl.className = 'dl-step completed';
+        stepMrg.className = 'dl-step completed';
+        stepDone.className = 'dl-step active';
+        msg.textContent = 'Your download should start shortly!';
+
+        // Trigger the actual download via hidden link
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.style.display = 'none';
+        a.setAttribute('download', '');
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        setTimeout(() => { overlay.classList.remove('active'); }, 2500);
+    }, 800);
 }
 
 function showProgressOverlay(type, fmt, isSpotify = false) {
