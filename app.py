@@ -556,7 +556,6 @@ def extract_video_info(video_url):
             ua = random.choice(user_agents)
             
             ydl_opts = {
-                'format': 'best',
                 'quiet': True,
                 'no_warnings': True,
                 'noplaylist': True,
