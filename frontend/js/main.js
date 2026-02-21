@@ -1,9 +1,5 @@
-// Update this with your actual Render backend URL before deploying to Netlify
-// e.g. 'https://your-app-name.onrender.com'
-const API_BASE_URL = 'https://ayoo-a9it.onrender.com';
-
-// Spotify Scraper API — used for Spotify metadata + downloads
-const SPOTIFY_API_BASE = 'https://spotify-scraper.replit.app';
+// Backend URL used by the Netlify frontend
+const API_BASE_URL = 'https://simple-downloader-5bscz.sevalla.app';
 
 document.addEventListener('DOMContentLoaded', function () {
     const form = document.getElementById('fetchForm');
@@ -30,7 +26,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         console.log('[DEBUG] resolving URL:', url);
 
-        // Route Spotify URLs to the dedicated Scraper API
+        // Route Spotify URLs for Spotify-specific UI handling
         const isSpotify = /spotify\.com/i.test(url) || /open\.spotify/i.test(url);
 
         if (isSpotify) {
@@ -52,7 +48,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     showError('Failed to fetch Spotify info. Please try again.');
                 });
         } else {
-            // Non-Spotify: use Render backend
+            // Non-Spotify: use backend
             fetch(`${API_BASE_URL}/api/resolve`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -80,50 +76,24 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 });
 
-/* -------- Spotify Scraper API -------- */
+/* -------- Spotify Resolve -------- */
 
 function resolveSpotify(spotifyUrl) {
-    const endpoint = `${SPOTIFY_API_BASE}/api/scrape?url=${encodeURIComponent(spotifyUrl)}`;
-    return fetch(endpoint)
+    const endpoint = `${API_BASE_URL}/api/resolve`;
+    return fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: spotifyUrl })
+    })
         .then(r => {
-            if (!r.ok) throw new Error('Spotify API returned ' + r.status);
+            if (!r.ok) throw new Error('Backend returned ' + r.status);
             return r.json();
         })
-        .then(raw => {
-            console.log('[DEBUG] Spotify scraper raw:', raw);
-            // Normalise into the shape renderVideoCard() expects
-            const track = (raw.tracks && raw.tracks[0]) || {};
-            const artistName = (track.artists && track.artists[0] && track.artists[0].name) || raw.preview?.artist || 'Unknown';
-            const artistId = track.artists && track.artists[0] && track.artists[0].id;
-            const artistImg = (artistId && raw.artistImages && raw.artistImages[artistId]) || (track.artists && track.artists[0] && track.artists[0].image) || '';
-            const albumImages = (track.album && track.album.images) || [];
-            const bigAlbumArt = albumImages.reduce((best, img) => (img.width > (best.width || 0) ? img : best), {});
-
-            // Format duration
-            const durationMs = track.duration_ms || 0;
-            const totalSec = Math.floor(durationMs / 1000);
-            const mins = Math.floor(totalSec / 60);
-            const secs = totalSec % 60;
-            const durationDisplay = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-
-            return {
-                title: track.name || raw.preview?.title || 'Unknown Track',
-                uploader: artistName,
-                channel: artistName,
-                thumbnail: bigAlbumArt.url || raw.preview?.image || '',
-                artist_image: artistImg,
-                duration_display: durationDisplay,
-                duration_ms: durationMs,
-                is_spotify: true,
-                platform: 'spotify',
-                platform_config: { name: 'Spotify', color: '#1DB954', icon: '🎵' },
-                // Store the download URLs from the API for direct streaming
-                spotify_download_url: track.download_url || '',
-                spotify_download_url_wav: track.download_url_wav || '',
-                // Preview URL as fallback
-                spotify_preview_url: track.preview_url || raw.preview?.audio || '',
-            };
+        .then(data => {
+            if (data && data.error) throw new Error(data.error);
+            return data;
         });
+        
 }
 
 function showError(msg) {
@@ -186,6 +156,7 @@ function renderVideoCard(info, originalUrl) {
     let downloadOptionsHtml = '';
 
     if (info.is_spotify) {
+        window._spotifySourceUrl = originalUrl;
         // Store download URLs in globals so the button handler can access them
         window._spotifyDownloadUrl = info.spotify_download_url || '';
         window._spotifyDownloadUrlWav = info.spotify_download_url_wav || '';
@@ -346,177 +317,34 @@ function startSpotifyDownload(fmt) {
     }
 
     var format = fmt || 'mp3';
-    console.log('[DEBUG] Spotify POST download:', { title: title, artist: artist, durationMs: durationMs, format: format });
 
-    // Show progress overlay
     showProgressOverlay('audio', format, true);
-    var bar = document.getElementById('dlBar');
-    var percent = document.getElementById('dlPercent');
-    var msg = document.getElementById('dlMsg');
-    var stepDl = document.getElementById('stepDownload');
-    var stepMrg = document.getElementById('stepMerge');
-    var stepDone = document.getElementById('stepDone');
-    var overlay = document.getElementById('dlProgressOverlay');
 
-    // ── Realistic progress simulation (~10s total) ──
-    var currentPct = 0;
-    var fetchDone = false;
-    var blobResult = null;
-    var fetchError = null;
-
-    // Dynamic status messages for each phase
-    var connectMsgs = ['Connecting to server…', 'Establishing connection…', 'Reaching Spotify servers…'];
-    var dlMsgs = ['Downloading audio…', 'Fetching audio stream…', 'Receiving data…', 'Buffering audio…'];
-    var convertMsgs = ['Converting to .' + format + '…', 'Processing audio…', 'Encoding ' + format.toUpperCase() + '…'];
-
-    function setProgress(pct, message) {
-        currentPct = Math.min(pct, 100);
-        bar.style.width = currentPct + '%';
-        percent.textContent = Math.round(currentPct) + '%';
-        if (message) msg.textContent = message;
-    }
-
-    function pickRandom(arr) {
-        return arr[Math.floor(Math.random() * arr.length)];
-    }
-
-    setProgress(0, pickRandom(connectMsgs));
-
-    // Phase-based tick interval (~300ms per tick)
-    var tickInterval = 300;
-    var tickCount = 0;
-
-    var progressTimer = setInterval(function () {
-        tickCount++;
-
-        if (fetchError) {
-            clearInterval(progressTimer);
-            return;
-        }
-
-        // If fetch completed, rush to finish
-        if (fetchDone && blobResult) {
-            clearInterval(progressTimer);
-            finishDownload(blobResult);
-            return;
-        }
-
-        // Phase 1: Connecting (0% – 15%, first ~2s = ~7 ticks)
-        if (currentPct < 15) {
-            var inc = 1.5 + Math.random() * 1.2;
-            setProgress(currentPct + inc);
-            if (tickCount === 3) {
-                msg.textContent = pickRandom(connectMsgs);
-            }
-        }
-        // Phase 2: Downloading (15% – 70%, ~5s = ~17 ticks)
-        else if (currentPct < 70) {
-            if (currentPct < 16) {
-                // Transition to download phase
-                stepDl.className = 'dl-step active';
-                msg.textContent = pickRandom(dlMsgs);
-            }
-            // Natural-feeling increments: faster in the middle, slower near edges
-            var distFromCenter = Math.abs(currentPct - 42) / 28;
-            var base = 2.8 * (1 - distFromCenter * 0.5);
-            var jitter = (Math.random() - 0.3) * 1.5;
-            var increment = Math.max(0.3, base + jitter);
-            setProgress(currentPct + increment);
-
-            // Cycle download messages occasionally
-            if (tickCount % 5 === 0) {
-                msg.textContent = pickRandom(dlMsgs);
-            }
-        }
-        // Phase 3: Converting (70% – 88%, ~3s = ~10 ticks)
-        else if (currentPct < 88) {
-            if (currentPct < 71) {
-                // Transition to converting phase
-                stepDl.className = 'dl-step completed';
-                stepMrg.className = 'dl-step active';
-                msg.textContent = pickRandom(convertMsgs);
-            }
-            // Slower, more deliberate increments
-            var inc3 = 1.0 + Math.random() * 1.2;
-            setProgress(currentPct + inc3);
-
-            if (tickCount % 6 === 0) {
-                msg.textContent = pickRandom(convertMsgs);
-            }
-        }
-        // Phase 4: Waiting for fetch (88% – 92%, crawl)
-        else if (currentPct < 92) {
-            var crawl = 0.1 + Math.random() * 0.3;
-            setProgress(currentPct + crawl, 'Finalizing…');
-        }
-        // Cap at 92% until fetch resolves — bar stalls here naturally
-    }, tickInterval);
-
-    // ── Actual fetch (runs in parallel with animation) ──
-    fetch(SPOTIFY_API_BASE + '/api/download', {
+    fetch(`${API_BASE_URL}/download_start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            trackName: title,
-            artistName: artist,
-            durationMs: durationMs,
-            format: format
+            url: window._spotifySourceUrl || '',
+            type: 'spotify',
+            format: format,
+            track_title: title,
+            track_artist: artist,
+            duration_ms: durationMs
         })
     })
-        .then(function (response) {
-            if (!response.ok) {
-                return response.text().then(function (t) { throw new Error(t || 'Download failed'); });
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (data.error) {
+                handleDownloadError(data.error);
+                updateDlCounter();
+                return;
             }
-            return response.blob();
+            updateDlCounter();
+            pollProgress(data.task_id);
         })
-        .then(function (blob) {
-            blobResult = blob;
-            fetchDone = true;
-            // If the timer already crawled past 92%, finish immediately
-            if (currentPct >= 92) {
-                clearInterval(progressTimer);
-                finishDownload(blob);
-            }
-        })
-        .catch(function (err) {
-            fetchError = err;
-            clearInterval(progressTimer);
-            console.error('[DEBUG] Spotify download error:', err);
-            msg.textContent = 'Download failed — ' + (err.message || 'please try again.');
-            msg.classList.add('dl-progress-error');
-            setTimeout(function () { overlay.classList.remove('active'); }, 4000);
+        .catch(function () {
+            handleDownloadError('Failed to start Spotify download.');
         });
-
-    // ── Finish: animate 92% → 100% and trigger file save ──
-    function finishDownload(blob) {
-        // Quick rush to 95%
-        setProgress(95, 'Preparing your file…');
-        stepDl.className = 'dl-step completed';
-        stepMrg.className = 'dl-step completed';
-
-        setTimeout(function () {
-            setProgress(98);
-        }, 300);
-
-        setTimeout(function () {
-            // Trigger the actual file download via blob URL
-            var blobUrl = URL.createObjectURL(blob);
-            var a = document.createElement('a');
-            var safeTitle = (title + ' - ' + artist).replace(/[^a-zA-Z0-9 \-_]/g, '');
-            a.href = blobUrl;
-            a.download = safeTitle + '.' + format;
-            a.style.display = 'none';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(blobUrl);
-
-            setProgress(100, 'Download complete!');
-            stepDone.className = 'dl-step active';
-
-            setTimeout(function () { overlay.classList.remove('active'); }, 2500);
-        }, 600);
-    }
 }
 
 function showProgressOverlay(type, fmt, isSpotify) {

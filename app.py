@@ -1700,19 +1700,19 @@ def download_start():
 
         t = threading.Thread(
             target=_run_spotify_download,
-            args=(task, track_title, track_artist, duration_ms, audio_format, PROXIES),
+            args=(task, track_title, track_artist, duration_ms, audio_format),
             daemon=True,
         )
     elif dl_type == 'audio':
         t = threading.Thread(
             target=_run_audio_download,
-            args=(task, video_url, audio_format, PROXIES),
+            args=(task, video_url, audio_format),
             daemon=True,
         )
     else:
         t = threading.Thread(
             target=_run_video_download,
-            args=(task, video_url, quality, PROXIES),
+            args=(task, video_url, quality),
             daemon=True,
         )
     t.start()
