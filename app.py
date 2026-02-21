@@ -4,6 +4,7 @@ import time
 import base64
 import re
 import json
+import subprocess
 import unicodedata
 from difflib import SequenceMatcher
 import tempfile
@@ -933,6 +934,51 @@ def _score_spotify_candidate(track_title, track_artists, target_dur_s, candidate
     return score, duration_diff
 
 
+def _yt_dlp_cli_search(query, limit=10, timeout=30):
+    """Search YouTube via yt-dlp CLI and return [(id, title, duration_sec), ...]."""
+    cmd = [
+        'yt-dlp',
+        f'ytsearch{limit}:{query}',
+        '--flat-playlist',
+        '--print', '%(id)s\t%(title)s\t%(duration)s',
+        '--no-download',
+        '--no-warnings',
+        '--quiet',
+    ]
+
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+    if result.returncode != 0:
+        stderr = (result.stderr or '').strip()
+        raise Exception(stderr or 'yt-dlp CLI search failed')
+
+    parsed = []
+    for line in (result.stdout or '').splitlines():
+        parts = line.split('\t')
+        if len(parts) < 3:
+            continue
+        video_id = (parts[0] or '').strip()
+        title = (parts[1] or '').strip()
+        raw_duration = (parts[2] or '').strip()
+
+        if not video_id:
+            continue
+        try:
+            duration = int(round(float(raw_duration)))
+        except Exception:
+            continue
+        if duration <= 0:
+            continue
+        parsed.append((video_id, title, duration))
+
+    return parsed
+
+
 def get_spotify_metadata(track_url):
     """
     Get Spotify track metadata using ScrapingBee + oEmbed.
@@ -1664,6 +1710,18 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
                     entry_url = entries[0].get('url') or entries[0].get('webpage_url')
                     if entry_url:
                         best_match = (0.0, entry_url)
+
+            # CLI fallback: mirror Spotify-Scraper method
+            if not best_match:
+                task['message'] = 'Searching via yt-dlp CLI fallback…'
+                query = f"{track_artist} - {track_title}"
+                cli_results = _yt_dlp_cli_search(query, limit=10, timeout=30)
+                if cli_results:
+                    target_duration_sec = int(round(target_dur_s))
+                    strict = [r for r in cli_results if abs(r[2] - target_duration_sec) <= 2]
+                    pool = strict if strict else cli_results
+                    best_cli = min(pool, key=lambda r: abs(r[2] - target_duration_sec))
+                    best_match = (0.0, f"https://www.youtube.com/watch?v={best_cli[0]}")
 
             if not best_match:
                 raise Exception("No suitable candidates found")
