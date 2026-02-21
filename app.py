@@ -1421,8 +1421,16 @@ def _run_video_download(task, video_url, quality, proxies=None):
                 has_audio,
             )
 
-        for player_client in player_clients:
+        task['status'] = 'downloading'
+        task['progress'] = max(task.get('progress', 0), 2)
+        task['message'] = 'Analyzing available streams…'
+
+        for idx, player_client in enumerate(player_clients):
             try:
+                probe_pct = 2 + int(((idx + 1) / len(player_clients)) * 13)
+                task['progress'] = max(task.get('progress', 0), probe_pct)
+                task['message'] = 'Checking stream quality options…'
+
                 probe_opts = {
                     'quiet': True,
                     'no_warnings': True,
@@ -1499,13 +1507,13 @@ def _run_video_download(task, video_url, quality, proxies=None):
             else:
                 format_selector = 'worst' if quality == 'worst' else 'best'
 
-        return format_selector, chosen_client, chosen_fmt.get('height')
+        return format_selector, chosen_client, chosen_fmt.get('height'), has_audio
     
     for attempt in range(3):
         tmpdir = tempfile.mkdtemp()
         task['tmpdir'] = tmpdir
         try:
-            fmt, selected_client, selected_height = _pick_video_format(video_url, quality)
+            fmt, selected_client, selected_height, selected_has_audio = _pick_video_format(video_url, quality)
 
             output_template = os.path.join(tmpdir, '%(id)s.%(ext)s')
 
@@ -1524,6 +1532,11 @@ def _run_video_download(task, video_url, quality, proxies=None):
                             task['progress'] = min(int(raw_pct * 85), 85)
                         else:
                             task['progress'] = min(85 + int(raw_pct * 10), 95)
+                    else:
+                        if _dl_state['streams_done'] == 0:
+                            task['progress'] = min(max(task.get('progress', 0) + 1, 20), 84)
+                        else:
+                            task['progress'] = min(max(task.get('progress', 85) + 1, 86), 95)
                     if _dl_state['streams_done'] == 0:
                         task['message'] = 'Downloading video…'
                     else:
@@ -1568,9 +1581,14 @@ def _run_video_download(task, video_url, quality, proxies=None):
                 }
             if HAS_FFMPEG:
                 ydl_opts['merge_output_format'] = 'mp4'
+                if not selected_has_audio:
+                    ydl_opts['postprocessor_args'] = {
+                        'Merger+ffmpeg': ['-c:v', 'copy', '-c:a', 'libmp3lame', '-b:a', '192k']
+                    }
 
             if selected_height:
                 task['message'] = f'Starting download ({selected_height}p)…'
+                task['progress'] = max(task.get('progress', 0), 15)
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(video_url, download=True)
