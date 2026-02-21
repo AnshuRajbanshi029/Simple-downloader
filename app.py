@@ -1627,6 +1627,44 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
                     duration_matches.sort(key=lambda x: x[0])
                     best_match = (1.0, duration_matches[0][1])
 
+            # Final fallback: relaxed search (prevents hard-fail at 0%)
+            if not best_match:
+                task['message'] = 'Using relaxed match fallback…'
+                ydl_opts_search = {
+                    'quiet': True,
+                    'no_warnings': True,
+                    'extract_flat': True,
+                    'socket_timeout': 15,
+                    'extractor_args': {'youtube': {'player_client': [random.choice(['android', 'ios', 'web', 'tv', 'mweb'])]}},
+                }
+                query = f"ytsearch8:{track_artist} - {track_title}"
+                with yt_dlp.YoutubeDL(ydl_opts_search) as ydl:
+                    results = ydl.extract_info(query, download=False)
+                    entries = results.get('entries', [])
+
+                relaxed_candidates = []
+                for entry in entries:
+                    res = _score_spotify_candidate(
+                        track_title,
+                        artist_list,
+                        target_dur_s,
+                        entry,
+                        tolerance=12,
+                    )
+                    if res:
+                        entry_url = entry.get('url') or entry.get('webpage_url')
+                        if entry_url:
+                            relaxed_candidates.append((res[0], entry_url))
+
+                if relaxed_candidates:
+                    relaxed_candidates.sort(key=lambda x: x[0], reverse=True)
+                    best_match = relaxed_candidates[0]
+                elif entries:
+                    # Last resort: first search result
+                    entry_url = entries[0].get('url') or entries[0].get('webpage_url')
+                    if entry_url:
+                        best_match = (0.0, entry_url)
+
             if not best_match:
                 raise Exception("No suitable candidates found")
 
