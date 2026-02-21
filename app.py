@@ -566,6 +566,7 @@ def extract_video_info(video_url):
                     'noplaylist': True,
                     'socket_timeout': 15,
                     'retries': 3,
+                    'geo_bypass': True,
                     'http_headers': {'User-Agent': ua},
                 }
                 if player_client:
@@ -1454,6 +1455,7 @@ def _run_video_download(task, video_url, quality, proxies=None):
                 'restrictfilenames': True,
                 'noplaylist': True,
                 'socket_timeout': 30,
+                'geo_bypass': True,
                 'concurrent_fragment_downloads': 8,
                 'extractor_args': {'youtube': {'player_client': [random.choice(['android', 'ios', 'web', 'tv', 'mweb'])]}},
                 'progress_hooks': [_progress_hook],
@@ -1540,6 +1542,7 @@ def _run_audio_download(task, video_url, audio_format, proxies=None):
                 'restrictfilenames': True,
                 'noplaylist': True,
                 'socket_timeout': 30,
+                'geo_bypass': True,
                 'concurrent_fragment_downloads': 8,
                 'extractor_args': {'youtube': {'player_client': [random.choice(['android', 'ios', 'web', 'tv', 'mweb'])]}},
                 'progress_hooks': [_progress_hook],
@@ -1576,6 +1579,7 @@ def _run_audio_download(task, video_url, audio_format, proxies=None):
                     'webm': 'audio/webm',
                     'ogg': 'audio/ogg',
                 }
+                task['filepath'] = filepath
                 task['filename'] = safe_filename
                 task['filesize'] = os.path.getsize(filepath)
                 task['mime_type'] = mime_map.get(actual_ext, f'audio/{actual_ext}')
@@ -1624,6 +1628,7 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
                     'no_warnings': True,
                     'extract_flat': True,
                     'socket_timeout': 15,
+                    'geo_bypass': True,
                     'extractor_args': {'youtube': {'player_client': [random.choice(['android', 'ios', 'web', 'tv', 'mweb'])]}},
                 }
                 try:
@@ -1649,6 +1654,7 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
                     'no_warnings': True,
                     'extract_flat': True,
                     'socket_timeout': 15,
+                    'geo_bypass': True,
                     'extractor_args': {'youtube': {'player_client': [random.choice(['android', 'ios', 'web', 'tv', 'mweb'])]}},
                 }
                 query = f"ytsearch10:{track_artist} - {track_title}"
@@ -1688,6 +1694,7 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
                     'no_warnings': True,
                     'extract_flat': True,
                     'socket_timeout': 15,
+                    'geo_bypass': True,
                     'extractor_args': {'youtube': {'player_client': [random.choice(['android', 'ios', 'web', 'tv', 'mweb'])]}},
                 }
                 query = f"ytsearch8:{track_artist} - {track_title}"
@@ -1767,6 +1774,7 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
                 'outtmpl': output_template,
                 'restrictfilenames': True,
                 'socket_timeout': 30,
+                'geo_bypass': True,
                 'extractor_args': {'youtube': {'player_client': [random.choice(['android', 'ios', 'web', 'tv', 'mweb'])]}},
                 'progress_hooks': [_progress_hook],
                 'postprocessor_hooks': [_postprocessor_hook],
@@ -2006,6 +2014,7 @@ def get_formats():
             ydl_opts = {
                 'quiet': True,
                 'no_warnings': True,
+                'geo_bypass': True,
                 'extractor_args': {'youtube': {'player_client': [random.choice(['android', 'ios', 'web', 'tv', 'mweb'])]}},
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:

@@ -404,6 +404,49 @@ function handleDownloadError(message) {
     setTimeout(function () { overlay.classList.remove('active'); }, 3000);
 }
 
+function parseFilenameFromDisposition(disposition) {
+    if (!disposition) return null;
+
+    const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utf8Match && utf8Match[1]) {
+        try {
+            return decodeURIComponent(utf8Match[1]);
+        } catch (e) {
+            return utf8Match[1];
+        }
+    }
+
+    const simpleMatch = disposition.match(/filename="?([^";]+)"?/i);
+    return simpleMatch && simpleMatch[1] ? simpleMatch[1] : null;
+}
+
+async function triggerFileDownload(taskId) {
+    const response = await fetch(`${API_BASE_URL}/download_file/${taskId}`);
+    if (!response.ok) {
+        let serverMessage = 'File not available.';
+        try {
+            serverMessage = (await response.text()) || serverMessage;
+        } catch (e) { }
+        throw new Error(serverMessage);
+    }
+
+    const blob = await response.blob();
+    const contentDisposition = response.headers.get('content-disposition') || '';
+    const filename = parseFilenameFromDisposition(contentDisposition) || `download-${taskId}`;
+
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () {
+        URL.revokeObjectURL(blobUrl);
+    }, 2000);
+}
+
 function pollProgress(taskId) {
     const overlay = document.getElementById('dlProgressOverlay');
     const bar = document.getElementById('dlBar');
@@ -439,23 +482,19 @@ function pollProgress(taskId) {
                     stepDone.className = 'dl-step active';
                     msg.textContent = 'Ready!';
 
-                    // Use a hidden link for reliable large-file downloads
                     setTimeout(function () {
-                        // For the download link, we also need to point to the backend
-                        const downloadUrl = `${API_BASE_URL}/download_file/${taskId}`;
-
-                        // Create invisible iframe or link to trigger download
-                        const a = document.createElement('a');
-                        a.href = downloadUrl;
-                        a.style.display = 'none';
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-
-                        setTimeout(function () {
-                            overlay.classList.remove('active');
-                        }, 2000);
-                    }, 800);
+                        triggerFileDownload(taskId)
+                            .then(function () {
+                                setTimeout(function () {
+                                    overlay.classList.remove('active');
+                                }, 1200);
+                            })
+                            .catch(function (err) {
+                                msg.textContent = err && err.message ? err.message : 'Download failed.';
+                                msg.classList.add('dl-progress-error');
+                                setTimeout(function () { overlay.classList.remove('active'); }, 3500);
+                            });
+                    }, 500);
                 } else if (data.status === 'error') {
                     clearInterval(timer);
                     msg.textContent = data.message || 'Download failed.';
