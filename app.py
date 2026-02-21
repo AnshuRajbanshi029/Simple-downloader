@@ -136,31 +136,7 @@ def unreserve_download():
 
 
 # ── Proxy Rotation Logic (for 402 Payment Required errors) ──────────────────
-PROXY_FILES = [".txt1", ".txt2", ".txt3", ".txt4"]
-_proxy_file_lock = threading.Lock()
-_current_proxy_index = 0
-
-def _load_proxies_from_file(file_name):
-    """Load proxy strings from a text file in the app directory."""
-    try:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        path = os.path.join(base_dir, file_name)
-        if os.path.exists(path):
-            with open(path, 'r', encoding='utf-8') as f:
-                return [line.strip() for line in f if line.strip()]
-    except Exception as e:
-        print(f"Error loading {file_name}: {e}")
-    return []
-
-def get_all_proxies():
-    """Returns a combined list of all proxies from all .txtN files."""
-    all_proxies = []
-    for file_name in PROXY_FILES:
-        all_proxies.extend(_load_proxies_from_file(file_name))
-    return all_proxies
-
-# Initial proxy list for global use (backwards compatibility)
-PROXIES = get_all_proxies()
+# Removed as we now use yt-dlp client impersonation instead.
 
 # Platform detection (video platforms only)
 PLATFORMS = {
@@ -254,23 +230,16 @@ def _fetch_html_with_proxies(url):
         "Referer": "https://www.google.com/"
     }
     
-    # Try all available proxies from all groups
-    all_proxies = get_all_proxies()
-    random.shuffle(all_proxies)
-
-    for proxy in all_proxies:
-        try:
-            proxy_url = f"http://{proxy}"
-            response = requests.get(
-                url,
-                headers=headers,
-                proxies={'http': proxy_url, 'https': proxy_url},
-                timeout=15
-            )
-            if response.status_code == 200:
-                return response.text
-        except Exception:
-            continue
+    try:
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=15
+        )
+        if response.status_code == 200:
+            return response.text
+    except Exception:
+        pass
             
     return None
 
@@ -342,7 +311,7 @@ def _pick_best_thumbnail(thumbnails):
 
 
 def get_instagram_user_avatar(user_id):
-    """Fetch an Instagram user's profile picture via the internal mobile API, rotating on 402."""
+    """Fetch an Instagram user's profile picture via the internal mobile API."""
     if not user_id:
         return None
 
@@ -356,40 +325,25 @@ def get_instagram_user_avatar(user_id):
         "X-IG-App-ID": "936619743392459",
     }
 
-    for attempt in range(1):
-        shuffled = get_all_proxies()
-        random.shuffle(shuffled)
-        all_402 = True
-
-        for proxy in shuffled[:4]:                       # try up to 4 proxies
-            try:
-                proxy_url = f"http://{proxy}"
-                resp = requests.get(
-                    api_url,
-                    headers=ig_headers,
-                    proxies={"http": proxy_url, "https": proxy_url},
-                    timeout=10,
-                )
-                if resp.status_code == 200:
-                    user = resp.json().get("user", {})
-                    # Prefer HD, fall back to standard
-                    hd = user.get("hd_profile_pic_url_info", {})
-                    pic = (
-                        hd.get("url")
-                        or user.get("profile_pic_url_hd")
-                        or user.get("profile_pic_url")
-                    )
-                    if pic:
-                        return pic
-                
-                if resp.status_code != 402:
-                    all_402 = False
-            except Exception as e:
-                if "402" not in str(e):
-                    all_402 = False
-                continue
-        
-        break
+    try:
+        resp = requests.get(
+            api_url,
+            headers=ig_headers,
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            user = resp.json().get("user", {})
+            # Prefer HD, fall back to standard
+            hd = user.get("hd_profile_pic_url_info", {})
+            pic = (
+                hd.get("url")
+                or user.get("profile_pic_url_hd")
+                or user.get("profile_pic_url")
+            )
+            if pic:
+                return pic
+    except Exception:
+        pass
 
     return None
 
@@ -582,17 +536,10 @@ def _should_proxy_image(url):
 
 
 def extract_video_info(video_url):
-    """Try a subset of proxies (10) up to 2 times each until one succeeds."""
+    """Extract video info using yt-dlp client impersonation without proxies."""
     last_error = None
     
-    # Get all proxies
-    all_proxies = get_all_proxies()
-    
-    # Pick up to 10 random proxies (fit within 120s timeout: 10 * 2 * 5s = 100s)
-    k = min(len(all_proxies), 10)
-    selected_proxies = random.sample(all_proxies, k) if k > 0 else []
-    
-    print(f"Attempting to extract video info using {len(selected_proxies)} proxies (2 attempts)...")
+    print(f"Attempting to extract video info...")
     
     # Rotate user agents to avoid bot detection
     user_agents = [
@@ -602,50 +549,45 @@ def extract_video_info(video_url):
         'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
     ]
 
-    for attempt in range(2):
-        # Shuffle again for the second attempt to vary order
-        random.shuffle(selected_proxies)
-        
-        for proxy in selected_proxies:
-            try:
-                # Rotate user agent
-                ua = random.choice(user_agents)
+    for attempt in range(3):
+        try:
+            # Rotate user agent
+            ua = random.choice(user_agents)
+            
+            ydl_opts = {
+                'format': 'best',
+                'quiet': True,
+                'no_warnings': True,
+                'noplaylist': True,
+                'socket_timeout': 15,
+                'retries': 3,
+                'http_headers': {'User-Agent': ua},
+                # Rotate clients to bypass "Sign in" check
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': [random.choice(['android', 'ios', 'web', 'tv', 'mweb'])]
+                    }
+                },
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(video_url, download=False)
                 
-                ydl_opts = {
-                    'format': 'best',
-                    'proxy': f"http://{proxy}",
-                    'quiet': True,
-                    'no_warnings': True,
-                    'noplaylist': True,
-                    'socket_timeout': 5,   # Reduced to 5s to prevent worker timeout
-                    'retries': 0,          # Do not retry internally
-                    'http_headers': {'User-Agent': ua},
-                    # Rotate clients to bypass "Sign in" check
-                    'extractor_args': {
-                        'youtube': {
-                            'player_client': [random.choice(['android', 'ios', 'web', 'tv', 'mweb'])]
-                        }
-                    },
-                }
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(video_url, download=False)
-                    
-                    # Try to get channel avatar for YouTube videos
-                    channel_id = info.get('channel_id')
-                    if channel_id and not info.get('artist_image'):
-                        avatar = get_youtube_channel_avatar(channel_id)
-                        if avatar:
-                            info['artist_image'] = avatar
-                    
-                    return info  # Success!
-            except Exception as e:
-                last_error = e
-                # Log the error and move to next proxy
-                print(f"Proxy {proxy} (Attempt {attempt+1}) failed: {str(e).splitlines()[0] if str(e) else 'Unknown error'}")
-                continue
+                # Try to get channel avatar for YouTube videos
+                channel_id = info.get('channel_id')
+                if channel_id and not info.get('artist_image'):
+                    avatar = get_youtube_channel_avatar(channel_id)
+                    if avatar:
+                        info['artist_image'] = avatar
+                
+                return info  # Success!
+        except Exception as e:
+            last_error = e
+            print(f"Attempt {attempt+1} failed: {str(e).splitlines()[0] if str(e) else 'Unknown error'}")
+            time.sleep(1)
+            continue
     
     # All attempts failed
-    raise last_error if last_error else Exception("All selected proxies failed to extract video info")
+    raise last_error if last_error else Exception("Failed to extract video info")
 
 spotify_token_cache = {
     'access_token': None,
@@ -1387,14 +1329,10 @@ def api_resolve():
 
 # ── Background download worker ───────────────────────────────────────────
 def _run_video_download(task, video_url, quality, proxies=None):
-    """Download video (+ merge audio) in a background thread, rotating on 402."""
+    """Download video (+ merge audio) in a background thread without proxies."""
     last_error = None
     
-    # Try all 40 proxies
-    shuffled = get_all_proxies()
-    random.shuffle(shuffled)
-
-    for proxy in shuffled:
+    for attempt in range(3):
         tmpdir = tempfile.mkdtemp()
         task['tmpdir'] = tmpdir
         try:
@@ -1457,7 +1395,6 @@ def _run_video_download(task, video_url, quality, proxies=None):
 
             ydl_opts = {
                 'format': fmt,
-                'proxy': f"http://{proxy}",
                 'quiet': True,
                 'no_warnings': True,
                 'outtmpl': output_template,
@@ -1465,7 +1402,7 @@ def _run_video_download(task, video_url, quality, proxies=None):
                 'noplaylist': True,
                 'socket_timeout': 30,
                 'concurrent_fragment_downloads': 8,
-                'extractor_args': {'youtube': {'player_client': ['ios,web']}},
+                'extractor_args': {'youtube': {'player_client': [random.choice(['android', 'ios', 'web', 'tv', 'mweb'])]}},
                 'progress_hooks': [_progress_hook],
                 'postprocessor_hooks': [_postprocessor_hook],
             }
@@ -1499,23 +1436,20 @@ def _run_video_download(task, video_url, quality, proxies=None):
         except Exception as e:
             last_error = e
             shutil.rmtree(tmpdir, ignore_errors=True)
+            time.sleep(1)
             continue
             
     task['status'] = 'error'
-    task['error'] = str(last_error) if last_error else 'All proxies failed'
+    task['error'] = str(last_error) if last_error else 'All attempts failed'
     task['message'] = 'Download failed — please try again.'
     unreserve_download()
 
 
 def _run_audio_download(task, video_url, audio_format, proxies=None):
-    """Download + convert audio in a background thread, rotating on 402."""
+    """Download + convert audio in a background thread without proxies."""
     last_error = None
     
-    # Try all 40 proxies
-    shuffled = get_all_proxies()
-    random.shuffle(shuffled)
-
-    for proxy in shuffled:
+    for attempt in range(3):
         tmpdir = tempfile.mkdtemp()
         task['tmpdir'] = tmpdir
         try:
@@ -1547,7 +1481,6 @@ def _run_audio_download(task, video_url, audio_format, proxies=None):
 
             ydl_opts = {
                 'format': 'bestaudio/best',
-                'proxy': f"http://{proxy}",
                 'quiet': True,
                 'no_warnings': True,
                 'outtmpl': output_template,
@@ -1555,7 +1488,7 @@ def _run_audio_download(task, video_url, audio_format, proxies=None):
                 'noplaylist': True,
                 'socket_timeout': 30,
                 'concurrent_fragment_downloads': 8,
-                'extractor_args': {'youtube': {'player_client': ['ios,web']}},
+                'extractor_args': {'youtube': {'player_client': [random.choice(['android', 'ios', 'web', 'tv', 'mweb'])]}},
                 'progress_hooks': [_progress_hook],
                 'postprocessor_hooks': [_postprocessor_hook],
             }
@@ -1600,23 +1533,20 @@ def _run_audio_download(task, video_url, audio_format, proxies=None):
         except Exception as e:
             last_error = e
             shutil.rmtree(tmpdir, ignore_errors=True)
+            time.sleep(1)
             continue
 
     task['status'] = 'error'
-    task['error'] = str(last_error) if last_error else 'All proxies failed'
+    task['error'] = str(last_error) if last_error else 'All attempts failed'
     task['message'] = 'Download failed — please try again.'
     unreserve_download()
 
 
 def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_format, proxies=None):
-    """Search YouTube for a Spotify track match and download it as audio, rotating on 402."""
+    """Search YouTube for a Spotify track match and download it as audio without proxies."""
     last_error = None
     
-    # Try all 40 proxies
-    shuffled = get_all_proxies()
-    random.shuffle(shuffled)
-
-    for proxy in shuffled:
+    for attempt in range(3):
         tmpdir = tempfile.mkdtemp()
         task['tmpdir'] = tmpdir
         try:
@@ -1634,11 +1564,11 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
             for query, msg, tol in strategies:
                 task['message'] = msg
                 ydl_opts_search = {
-                    'proxy': f"http://{proxy}",
                     'quiet': True,
                     'no_warnings': True,
                     'extract_flat': True,
                     'socket_timeout': 15,
+                    'extractor_args': {'youtube': {'player_client': [random.choice(['android', 'ios', 'web', 'tv', 'mweb'])]}},
                 }
                 try:
                     with yt_dlp.YoutubeDL(ydl_opts_search) as ydl:
@@ -1685,12 +1615,12 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
 
             ydl_opts = {
                 'format': 'bestaudio/best',
-                'proxy': f"http://{proxy}",
                 'quiet': True,
                 'no_warnings': True,
                 'outtmpl': output_template,
                 'restrictfilenames': True,
                 'socket_timeout': 30,
+                'extractor_args': {'youtube': {'player_client': [random.choice(['android', 'ios', 'web', 'tv', 'mweb'])]}},
                 'progress_hooks': [_progress_hook],
                 'postprocessor_hooks': [_postprocessor_hook],
             }
@@ -1719,10 +1649,11 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
         except Exception as e:
             last_error = e
             shutil.rmtree(tmpdir, ignore_errors=True)
+            time.sleep(1)
             continue
 
     task['status'] = 'error'
-    task['error'] = str(last_error) if last_error else 'All proxies failed during download'
+    task['error'] = str(last_error) if last_error else 'All attempts failed during download'
     task['message'] = 'Download failed — please try again.'
     unreserve_download()
 
@@ -1840,7 +1771,7 @@ def download_file(task_id):
 
 @app.route('/proxy_image')
 def proxy_image():
-    """Proxy an external image through this server, rotating on failure."""
+    """Proxy an external image through this server."""
     from urllib.parse import urlparse
 
     img_url = request.args.get('url', '')
@@ -1852,43 +1783,29 @@ def proxy_image():
     if not allowed:
         return '', 403
 
-    for attempt in range(2):
-        shuffled = PROXIES.copy()
-        random.shuffle(shuffled)
-        all_402 = True
+    try:
+        resp = requests.get(
+            img_url,
+            headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                              'AppleWebKit/537.36 (KHTML, like Gecko) '
+                              'Chrome/120.0.0.0 Safari/537.36',
+                'Referer': 'https://www.instagram.com/',
+                'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+            },
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            ct = resp.headers.get('Content-Type', 'image/jpeg')
+            return Response(
+                resp.content,
+                content_type=ct,
+                headers={'Cache-Control': 'public, max-age=86400'},
+            )
+    except Exception:
+        pass
 
-        for proxy_str in shuffled[:4]: # Try up to 4 proxies from current group
-            try:
-                proxy_url = f"http://{proxy_str}"
-                resp = requests.get(
-                    img_url,
-                    headers={
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                                      'AppleWebKit/537.36 (KHTML, like Gecko) '
-                                      'Chrome/120.0.0.0 Safari/537.36',
-                        'Referer': 'https://www.instagram.com/',
-                        'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-                    },
-                    proxies={'http': proxy_url, 'https': proxy_url},
-                    timeout=10,
-                )
-                if resp.status_code == 200:
-                    ct = resp.headers.get('Content-Type', 'image/jpeg')
-                    return Response(
-                        resp.content,
-                        content_type=ct,
-                        headers={'Cache-Control': 'public, max-age=86400'},
-                    )
-                if resp.status_code != 402:
-                    all_402 = False
-            except Exception as e:
-                if "402" not in str(e):
-                    all_402 = False
-                continue
-        
-        break
-
-    # Final fallback without proxy
+    # Final fallback
     try:
         resp = requests.get(
             img_url,
@@ -1930,44 +1847,35 @@ def download_audio():
 
 @app.route('/get_formats')
 def get_formats():
-    """Get available video formats for a URL, rotating on failure."""
+    """Get available video formats for a URL without proxies."""
     video_url = request.args.get('url')
     if not video_url:
         return {'error': 'No URL provided'}, 400
 
     last_error = None
-    for attempt in range(2):
-        shuffled = PROXIES.copy()
-        random.shuffle(shuffled)
-        all_402 = True
-
-        for proxy in shuffled:
-            try:
-                ydl_opts = {
-                    'proxy': f"http://{proxy}",
-                    'quiet': True,
-                    'no_warnings': True,
-                }
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(video_url, download=False)
-                    formats = info.get('formats', [])
-                    video_fmts = [f for f in formats if f.get('vcodec') != 'none' and f.get('height')]
-                    
-                    if video_fmts:
-                        best_height = max(f.get('height', 0) for f in video_fmts)
-                        worst_height = min(f.get('height', 0) for f in video_fmts)
-                        return {
-                            'best_quality': f"{best_height}p" if best_height else 'Best',
-                            'worst_quality': f"{worst_height}p" if worst_height else 'Low',
-                        }
-                    return {'best_quality': 'HD', 'worst_quality': 'SD'}
-            except Exception as e:
-                last_error = e
-                if "402" not in str(e):
-                    all_402 = False
-                continue
-        
-        break
+    for attempt in range(3):
+        try:
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extractor_args': {'youtube': {'player_client': [random.choice(['android', 'ios', 'web', 'tv', 'mweb'])]}},
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(video_url, download=False)
+                formats = info.get('formats', [])
+                video_fmts = [f for f in formats if f.get('vcodec') != 'none' and f.get('height')]
+                
+                if video_fmts:
+                    best_height = max(f.get('height', 0) for f in video_fmts)
+                    worst_height = min(f.get('height', 0) for f in video_fmts)
+                    return {
+                        'best_quality': f"{best_height}p" if best_height else 'Best',
+                        'worst_quality': f"{worst_height}p" if worst_height else 'Low',
+                    }
+                return {'best_quality': 'HD', 'worst_quality': 'SD'}
+        except Exception as e:
+            last_error = e
+            continue
             
     return {'best_quality': 'HD', 'worst_quality': 'SD'}
 
