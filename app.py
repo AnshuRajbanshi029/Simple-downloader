@@ -1499,7 +1499,11 @@ def _run_video_download(task, video_url, quality, proxies=None):
             if has_audio:
                 format_selector = format_id
             else:
-                audio_selector = 'worstaudio' if quality == 'worst' else 'bestaudio'
+                audio_selector = (
+                    'worstaudio[acodec^=mp4a]/worstaudio[acodec^=aac]/worstaudio[ext=m4a]/worstaudio'
+                    if quality == 'worst'
+                    else 'bestaudio[acodec^=mp4a]/bestaudio[acodec^=aac]/bestaudio[ext=m4a]/bestaudio'
+                )
                 format_selector = f'{format_id}+{audio_selector}/{format_id}'
         else:
             if has_audio:
@@ -1583,7 +1587,7 @@ def _run_video_download(task, video_url, quality, proxies=None):
                 ydl_opts['merge_output_format'] = 'mp4'
                 if not selected_has_audio:
                     ydl_opts['postprocessor_args'] = {
-                        'Merger+ffmpeg': ['-c:v', 'copy', '-c:a', 'libmp3lame', '-b:a', '192k']
+                        'merger+ffmpeg': ['-c:v', 'copy', '-c:a', 'libmp3lame', '-b:a', '192k']
                     }
 
             if selected_height:
