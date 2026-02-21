@@ -1404,21 +1404,108 @@ def api_resolve():
 def _run_video_download(task, video_url, quality, proxies=None):
     """Download video (+ merge audio) in a background thread without proxies."""
     last_error = None
+
+    def _pick_video_format(video_url, quality):
+        player_clients = ['web', 'mweb', 'android', 'ios', 'tv', None]
+        chosen_fmt = None
+        chosen_client = None
+        chosen_score = None
+        probe_error = None
+
+        def _score(fmt):
+            has_audio = 1 if fmt.get('acodec') not in (None, 'none') else 0
+            return (
+                fmt.get('height') or 0,
+                fmt.get('tbr') or 0,
+                fmt.get('fps') or 0,
+                has_audio,
+            )
+
+        for player_client in player_clients:
+            try:
+                probe_opts = {
+                    'quiet': True,
+                    'no_warnings': True,
+                    'noplaylist': True,
+                    'socket_timeout': 20,
+                    'geo_bypass': True,
+                }
+                if player_client:
+                    probe_opts['extractor_args'] = {
+                        'youtube': {
+                            'player_client': [player_client]
+                        }
+                    }
+
+                with yt_dlp.YoutubeDL(probe_opts) as ydl:
+                    info = ydl.extract_info(video_url, download=False)
+                    formats = info.get('formats') or []
+
+                candidates = [
+                    fmt for fmt in formats
+                    if fmt.get('vcodec') != 'none' and fmt.get('height')
+                ]
+                if not HAS_FFMPEG:
+                    candidates = [
+                        fmt for fmt in candidates
+                        if fmt.get('acodec') not in (None, 'none')
+                    ]
+
+                if not candidates:
+                    continue
+
+                candidate = min(candidates, key=_score) if quality == 'worst' else max(candidates, key=_score)
+                candidate_score = _score(candidate)
+
+                if chosen_fmt is None:
+                    chosen_fmt = candidate
+                    chosen_client = player_client
+                    chosen_score = candidate_score
+                    continue
+
+                if quality == 'worst':
+                    if candidate_score < chosen_score:
+                        chosen_fmt = candidate
+                        chosen_client = player_client
+                        chosen_score = candidate_score
+                else:
+                    if candidate_score > chosen_score:
+                        chosen_fmt = candidate
+                        chosen_client = player_client
+                        chosen_score = candidate_score
+            except Exception as e:
+                probe_error = e
+                continue
+
+        if not chosen_fmt:
+            if probe_error:
+                raise probe_error
+            raise Exception('No downloadable video formats found')
+
+        format_id = chosen_fmt.get('format_id')
+        has_audio = chosen_fmt.get('acodec') not in (None, 'none')
+        if not format_id:
+            raise Exception('Selected format is missing format_id')
+
+        if HAS_FFMPEG:
+            if has_audio:
+                format_selector = format_id
+            else:
+                audio_selector = 'worstaudio' if quality == 'worst' else 'bestaudio'
+                format_selector = f'{format_id}+{audio_selector}/{format_id}'
+        else:
+            if has_audio:
+                format_selector = format_id
+            else:
+                format_selector = 'worst' if quality == 'worst' else 'best'
+
+        return format_selector, chosen_client, chosen_fmt.get('height')
     
     for attempt in range(3):
         tmpdir = tempfile.mkdtemp()
         task['tmpdir'] = tmpdir
         try:
-            if quality == 'worst':
-                if HAS_FFMPEG:
-                    fmt = 'worstvideo+worstaudio/worst'
-                else:
-                    fmt = 'worst'
-            else:
-                if HAS_FFMPEG:
-                    fmt = 'bestvideo+bestaudio/best'
-                else:
-                    fmt = 'best'
+            fmt, selected_client, selected_height = _pick_video_format(video_url, quality)
 
             output_template = os.path.join(tmpdir, '%(id)s.%(ext)s')
 
@@ -1470,12 +1557,20 @@ def _run_video_download(task, video_url, quality, proxies=None):
                 'socket_timeout': 30,
                 'geo_bypass': True,
                 'concurrent_fragment_downloads': 8,
-                'extractor_args': {'youtube': {'player_client': [random.choice(['android', 'ios', 'web', 'tv', 'mweb'])]}},
                 'progress_hooks': [_progress_hook],
                 'postprocessor_hooks': [_postprocessor_hook],
             }
+            if selected_client:
+                ydl_opts['extractor_args'] = {
+                    'youtube': {
+                        'player_client': [selected_client]
+                    }
+                }
             if HAS_FFMPEG:
                 ydl_opts['merge_output_format'] = 'mp4'
+
+            if selected_height:
+                task['message'] = f'Starting download ({selected_height}p)…'
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(video_url, download=True)
