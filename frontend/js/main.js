@@ -151,6 +151,15 @@ function renderVideoCard(info, originalUrl) {
     const platformId = info.platform || 'youtube';
     const platformConfig = info.platform_config || {};
     const platformColor = platformConfig.color || '#FF0000';
+    const sourceUrl = String(originalUrl || info.webpage_url || info.original_url || '');
+    const isYouTubeShort =
+        platformId === 'youtube' &&
+        (/youtube\.com\/shorts\//i.test(sourceUrl) || /\/shorts\//i.test(String(info.webpage_url || '')));
+
+    const width = Number(info.width || 0);
+    const height = Number(info.height || 0);
+    const isPortraitByDimensions = height > 0 && width > 0 && height > width;
+    const isPortraitThumb = ['tiktok', 'instagram'].includes(platformId) || isYouTubeShort || isPortraitByDimensions;
 
     // Helper to generate download buttons HTML
     let downloadOptionsHtml = '';
@@ -237,7 +246,7 @@ function renderVideoCard(info, originalUrl) {
 
     const cardHtml = `
     <div class="video-card">
-        <div class="thumbnail-container ${['tiktok', 'instagram'].includes(platformId) ? 'portrait' : ''} ${platformId === 'spotify' ? 'spotify' : ''}">
+        <div class="thumbnail-container ${isPortraitThumb ? 'portrait' : ''} ${platformId === 'spotify' ? 'spotify' : ''}">
             <img src="${thumbnail || ''}" alt="Thumbnail" loading="eager" onerror="this.style.display='none'">
             ${(info.duration_display || info.duration) ? `<span class="duration-badge">${info.duration_display || info.duration}</span>` : ''}
         </div>
