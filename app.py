@@ -550,41 +550,49 @@ def extract_video_info(video_url):
         'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
     ]
 
+    player_clients = ['android', 'ios', 'mweb', 'web', 'tv']
+    # Include None as default extractor behavior fallback
+    client_attempts = player_clients + [None]
+
     for attempt in range(3):
-        try:
-            # Rotate user agent
-            ua = random.choice(user_agents)
-            
-            ydl_opts = {
-                'quiet': True,
-                'no_warnings': True,
-                'noplaylist': True,
-                'socket_timeout': 15,
-                'retries': 3,
-                'http_headers': {'User-Agent': ua},
-                # Rotate clients to bypass "Sign in" check
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': [random.choice(['android', 'ios', 'web', 'tv', 'mweb'])]
+        # Rotate user agent per attempt
+        ua = random.choice(user_agents)
+
+        for player_client in client_attempts:
+            try:
+                ydl_opts = {
+                    'quiet': True,
+                    'no_warnings': True,
+                    'noplaylist': True,
+                    'socket_timeout': 15,
+                    'retries': 3,
+                    'http_headers': {'User-Agent': ua},
+                }
+                if player_client:
+                    ydl_opts['extractor_args'] = {
+                        'youtube': {
+                            'player_client': [player_client]
+                        }
                     }
-                },
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(video_url, download=False)
-                
-                # Try to get channel avatar for YouTube videos
-                channel_id = info.get('channel_id')
-                if channel_id and not info.get('artist_image'):
-                    avatar = get_youtube_channel_avatar(channel_id)
-                    if avatar:
-                        info['artist_image'] = avatar
-                
-                return info  # Success!
-        except Exception as e:
-            last_error = e
-            print(f"Attempt {attempt+1} failed: {str(e).splitlines()[0] if str(e) else 'Unknown error'}")
-            time.sleep(1)
-            continue
+
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(video_url, download=False)
+
+                    # Try to get channel avatar for YouTube videos
+                    channel_id = info.get('channel_id')
+                    if channel_id and not info.get('artist_image'):
+                        avatar = get_youtube_channel_avatar(channel_id)
+                        if avatar:
+                            info['artist_image'] = avatar
+
+                    return info  # Success!
+            except Exception as e:
+                last_error = e
+                continue
+
+        print(f"Attempt {attempt+1} failed: {str(last_error).splitlines()[0] if str(last_error) else 'Unknown error'}")
+        time.sleep(1)
+        continue
     
     # All attempts failed
     raise last_error if last_error else Exception("Failed to extract video info")
