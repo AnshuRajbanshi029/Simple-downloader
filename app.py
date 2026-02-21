@@ -539,6 +539,8 @@ def _should_proxy_image(url):
 def extract_video_info(video_url):
     """Extract video info using yt-dlp client impersonation without proxies."""
     last_error = None
+    best_info = None
+    best_height = -1
     
     print(f"Attempting to extract video info...")
     
@@ -550,7 +552,7 @@ def extract_video_info(video_url):
         'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
     ]
 
-    player_clients = ['android', 'ios', 'mweb', 'web', 'tv']
+    player_clients = ['web', 'mweb', 'android', 'ios', 'tv']
     # Include None as default extractor behavior fallback
     client_attempts = player_clients + [None]
 
@@ -579,14 +581,23 @@ def extract_video_info(video_url):
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(video_url, download=False)
 
-                    # Try to get channel avatar for YouTube videos
-                    channel_id = info.get('channel_id')
-                    if channel_id and not info.get('artist_image'):
-                        avatar = get_youtube_channel_avatar(channel_id)
-                        if avatar:
-                            info['artist_image'] = avatar
+                    formats = info.get('formats') or []
+                    current_height = max(
+                        (f.get('height') or 0) for f in formats if isinstance(f, dict)
+                    ) if formats else 0
 
-                    return info  # Success!
+                    if current_height > best_height:
+                        best_height = current_height
+                        best_info = info
+
+                    # Early return if we already found high-res metadata
+                    if best_height >= 1440:
+                        channel_id = best_info.get('channel_id')
+                        if channel_id and not best_info.get('artist_image'):
+                            avatar = get_youtube_channel_avatar(channel_id)
+                            if avatar:
+                                best_info['artist_image'] = avatar
+                        return best_info
             except Exception as e:
                 last_error = e
                 continue
@@ -595,6 +606,14 @@ def extract_video_info(video_url):
         time.sleep(1)
         continue
     
+    if best_info:
+        channel_id = best_info.get('channel_id')
+        if channel_id and not best_info.get('artist_image'):
+            avatar = get_youtube_channel_avatar(channel_id)
+            if avatar:
+                best_info['artist_image'] = avatar
+        return best_info
+
     # All attempts failed
     raise last_error if last_error else Exception("Failed to extract video info")
 
@@ -1392,20 +1411,14 @@ def _run_video_download(task, video_url, quality, proxies=None):
         try:
             if quality == 'worst':
                 if HAS_FFMPEG:
-                    fmt = ('worstvideo[ext=mp4][vcodec^=avc]+worstaudio[ext=m4a]'
-                           '/worstvideo[ext=mp4]+worstaudio[ext=m4a]'
-                           '/worstvideo+worstaudio'
-                           '/worst[ext=mp4]/worst')
+                    fmt = 'worstvideo+worstaudio/worst'
                 else:
-                    fmt = 'worst[ext=mp4][vcodec^=avc]/worst[ext=mp4]/worst'
+                    fmt = 'worst'
             else:
                 if HAS_FFMPEG:
-                    fmt = ('bestvideo[ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]'
-                           '/bestvideo[ext=mp4]+bestaudio[ext=m4a]'
-                           '/bestvideo+bestaudio'
-                           '/best[ext=mp4]/best')
+                    fmt = 'bestvideo+bestaudio/best'
                 else:
-                    fmt = 'best[ext=mp4][vcodec^=avc]/best[ext=mp4]/best'
+                    fmt = 'best'
 
             output_template = os.path.join(tmpdir, '%(id)s.%(ext)s')
 
