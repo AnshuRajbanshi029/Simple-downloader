@@ -1545,6 +1545,9 @@ def _run_audio_download(task, video_url, audio_format, proxies=None):
 def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_format, proxies=None):
     """Search YouTube for a Spotify track match and download it as audio without proxies."""
     last_error = None
+    artist_list = [a.strip() for a in re.split(r',|&| and ', track_artist or '') if a.strip()]
+    if not artist_list:
+        artist_list = [track_artist] if track_artist else []
     
     for attempt in range(3):
         tmpdir = tempfile.mkdtemp()
@@ -1576,7 +1579,7 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
                         entries = results.get('entries', [])
                         candidates = []
                         for entry in entries:
-                            res = _score_spotify_candidate(track_title, [track_artist], target_dur_s, entry, tolerance=tol)
+                            res = _score_spotify_candidate(track_title, artist_list, target_dur_s, entry, tolerance=tol)
                             if res:
                                 candidates.append((res[0], entry['url']))
                         if candidates:
@@ -1585,11 +1588,52 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
                 except Exception:
                     continue
 
+            # Fallback: use Spotify-Scraper's strict duration strategy (±2s)
+            if not best_match:
+                task['message'] = 'Matching by duration…'
+                ydl_opts_search = {
+                    'quiet': True,
+                    'no_warnings': True,
+                    'extract_flat': True,
+                    'socket_timeout': 15,
+                    'extractor_args': {'youtube': {'player_client': [random.choice(['android', 'ios', 'web', 'tv', 'mweb'])]}},
+                }
+                query = f"ytsearch10:{track_artist} - {track_title}"
+                with yt_dlp.YoutubeDL(ydl_opts_search) as ydl:
+                    results = ydl.extract_info(query, download=False)
+                    entries = results.get('entries', [])
+
+                target_duration_sec = int(round(target_dur_s))
+                tolerance_sec = 2
+                duration_matches = []
+                for entry in entries:
+                    duration = entry.get('duration')
+                    if duration is None:
+                        continue
+                    try:
+                        duration_int = int(round(float(duration)))
+                    except Exception:
+                        continue
+                    if duration_int <= 0:
+                        continue
+
+                    diff = abs(duration_int - target_duration_sec)
+                    if diff <= tolerance_sec:
+                        entry_url = entry.get('url') or entry.get('webpage_url')
+                        if entry_url:
+                            duration_matches.append((diff, entry_url))
+
+                if duration_matches:
+                    duration_matches.sort(key=lambda x: x[0])
+                    best_match = (1.0, duration_matches[0][1])
+
             if not best_match:
                 raise Exception("No suitable candidates found")
 
             # Download actual match
             video_url = best_match[1]
+            if isinstance(video_url, str) and re.fullmatch(r'[\w-]{11}', video_url):
+                video_url = f"https://www.youtube.com/watch?v={video_url}"
             output_template = os.path.join(tmpdir, '%(id)s.%(ext)s')
 
             # Hooks
@@ -1639,7 +1683,8 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
 
                 filepath = os.path.join(tmpdir, downloaded_files[0])
                 task['filepath'] = filepath
-                task['filename'] = re.sub(r'[^\w\-_.]', '_', track_title)[:100] + f'.{ext}'
+                base_name = f"{track_artist} - {track_title}" if track_artist else track_title
+                task['filename'] = re.sub(r'[^\w\-_.]', '_', base_name)[:100] + f'.{ext}'
                 task['filesize'] = os.path.getsize(filepath)
                 task['mime_type'] = f'audio/{ext}'
                 task['status'] = 'done'
