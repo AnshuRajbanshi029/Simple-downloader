@@ -1,6 +1,6 @@
 flask
 requests
-yt-dlp
+yt-dlp[default] @ https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.tar.gz
 gunicorn
 beautifulsoup4
 flask-cors

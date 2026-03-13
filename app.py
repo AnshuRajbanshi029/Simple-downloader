@@ -536,47 +536,94 @@ def _should_proxy_image(url):
     return host.endswith('.cdninstagram.com') or host.endswith('.fbcdn.net')
 
 
+# ── Centralized YouTube anti-bot evasion config ──────────────────────────────
+# Prioritized player clients: web_safari bypasses most bot detection,
+# mediaconnect and tv_embedded also work well. Classic clients as fallback.
+_YT_PLAYER_CLIENTS = [
+    'web_safari',      # Safari UA — best bypass for "not a bot" checks
+    'mediaconnect',    # Media device client — low bot detection
+    'tv_embedded',     # Smart TV embedded player — less scrutiny
+    'web_music',       # YouTube Music web client
+    'web_creator',     # YouTube Studio client
+    'mweb',            # Mobile web
+    'ios',             # iOS app
+    'android',         # Android app
+    'web',             # Standard web (most likely to be blocked)
+    'tv',              # Smart TV
+]
+
+# User agents matched to client types for consistency
+_UA_MAP = {
+    'web_safari': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_4) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15',
+    'ios': 'com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X;)',
+    'android': 'com.google.android.youtube/19.44.38 (Linux; U; Android 14) gzip',
+    'mweb': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
+    'tv': 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version',
+    'tv_embedded': 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version',
+    '_default': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+}
+
+
+def _yt_dlp_base_opts(player_client=None, for_download=False, extra_opts=None):
+    """Build yt-dlp options with layered anti-bot evasion.
+
+    Args:
+        player_client: Specific YouTube player client to use (or None for default).
+        for_download: If True, add download-oriented options (longer timeouts, etc.).
+        extra_opts: Additional options dict to merge.
+    Returns:
+        Dict of yt-dlp options.
+    """
+    ua = _UA_MAP.get(player_client, _UA_MAP['_default'])
+
+    opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'noplaylist': True,
+        'geo_bypass': True,
+        'socket_timeout': 30 if for_download else 20,
+        'retries': 5,
+        'http_headers': {
+            'User-Agent': ua,
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Sec-Fetch-Mode': 'navigate',
+        },
+    }
+
+    if player_client:
+        opts['extractor_args'] = {
+            'youtube': {
+                'player_client': [player_client],
+            }
+        }
+
+    if for_download:
+        opts['concurrent_fragment_downloads'] = 8
+        opts['retries'] = 10
+        opts['fragment_retries'] = 10
+
+    if extra_opts:
+        opts.update(extra_opts)
+
+    return opts
+
+
 def extract_video_info(video_url):
-    """Extract video info using yt-dlp client impersonation without proxies."""
+    """Extract video info using yt-dlp with multi-client anti-bot strategy."""
     last_error = None
     best_info = None
     best_height = -1
-    
+
     print(f"Attempting to extract video info...")
-    
-    # Rotate user agents to avoid bot detection
-    user_agents = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-    ]
 
-    player_clients = ['web', 'mweb', 'android', 'ios', 'tv']
-    # Include None as default extractor behavior fallback
-    client_attempts = player_clients + [None]
+    # Try each client in priority order; web_safari first (best bypass)
+    clients_to_try = _YT_PLAYER_CLIENTS + [None]   # None = yt-dlp default
 
-    for attempt in range(3):
-        # Rotate user agent per attempt
-        ua = random.choice(user_agents)
-
-        for player_client in client_attempts:
+    for attempt in range(2):
+        for player_client in clients_to_try:
             try:
-                ydl_opts = {
-                    'quiet': True,
-                    'no_warnings': True,
-                    'noplaylist': True,
-                    'socket_timeout': 15,
-                    'retries': 3,
-                    'geo_bypass': True,
-                    'http_headers': {'User-Agent': ua},
-                }
-                if player_client:
-                    ydl_opts['extractor_args'] = {
-                        'youtube': {
-                            'player_client': [player_client]
-                        }
-                    }
+                ydl_opts = _yt_dlp_base_opts(player_client)
 
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(video_url, download=False)
@@ -598,14 +645,28 @@ def extract_video_info(video_url):
                             if avatar:
                                 best_info['artist_image'] = avatar
                         return best_info
+
+                    # If we got ANY valid formats, no need to try more clients
+                    if current_height > 0:
+                        break
+
             except Exception as e:
                 last_error = e
+                err_str = str(e).lower()
+                # If bot detection or sign-in error, try next client
+                if 'sign in' in err_str or 'bot' in err_str or '403' in err_str:
+                    print(f"  Client '{player_client}' blocked, trying next…")
+                    time.sleep(0.5)
+                    continue
+                # Other errors — still try next client
                 continue
 
-        print(f"Attempt {attempt+1} failed: {str(last_error).splitlines()[0] if str(last_error) else 'Unknown error'}")
-        time.sleep(1)
-        continue
-    
+        if best_info:
+            break
+
+        print(f"Attempt {attempt+1} — all clients failed: {str(last_error).splitlines()[0] if str(last_error) else 'Unknown error'}")
+        time.sleep(2)
+
     if best_info:
         channel_id = best_info.get('channel_id')
         if channel_id and not best_info.get('artist_image'):
@@ -1406,7 +1467,7 @@ def _run_video_download(task, video_url, quality, proxies=None):
     last_error = None
 
     def _pick_video_format(video_url, quality):
-        player_clients = ['web', 'mweb', 'android', 'ios', 'tv', None]
+        player_clients = _YT_PLAYER_CLIENTS + [None]
         chosen_fmt = None
         chosen_client = None
         chosen_score = None
@@ -1431,19 +1492,7 @@ def _run_video_download(task, video_url, quality, proxies=None):
                 task['progress'] = max(task.get('progress', 0), probe_pct)
                 task['message'] = 'Checking stream quality options…'
 
-                probe_opts = {
-                    'quiet': True,
-                    'no_warnings': True,
-                    'noplaylist': True,
-                    'socket_timeout': 20,
-                    'geo_bypass': True,
-                }
-                if player_client:
-                    probe_opts['extractor_args'] = {
-                        'youtube': {
-                            'player_client': [player_client]
-                        }
-                    }
+                probe_opts = _yt_dlp_base_opts(player_client)
 
                 with yt_dlp.YoutubeDL(probe_opts) as ydl:
                     info = ydl.extract_info(video_url, download=False)
@@ -1578,11 +1627,9 @@ def _run_video_download(task, video_url, quality, proxies=None):
                 'postprocessor_hooks': [_postprocessor_hook],
             }
             if selected_client:
-                ydl_opts['extractor_args'] = {
-                    'youtube': {
-                        'player_client': [selected_client]
-                    }
-                }
+                base = _yt_dlp_base_opts(selected_client, for_download=True)
+                ydl_opts['extractor_args'] = base.get('extractor_args', {})
+                ydl_opts['http_headers'] = base.get('http_headers', {})
             if HAS_FFMPEG:
                 ydl_opts['merge_output_format'] = 'mp4'
                 if not selected_has_audio:
@@ -1664,20 +1711,14 @@ def _run_audio_download(task, video_url, audio_format, proxies=None):
                     task['progress'] = 99
                     task['message'] = 'Conversion complete!'
 
-            ydl_opts = {
+            _chosen_client = random.choice(_YT_PLAYER_CLIENTS[:5])
+            ydl_opts = _yt_dlp_base_opts(_chosen_client, for_download=True, extra_opts={
                 'format': 'bestaudio/best',
-                'quiet': True,
-                'no_warnings': True,
                 'outtmpl': output_template,
                 'restrictfilenames': True,
-                'noplaylist': True,
-                'socket_timeout': 30,
-                'geo_bypass': True,
-                'concurrent_fragment_downloads': 8,
-                'extractor_args': {'youtube': {'player_client': [random.choice(['android', 'ios', 'web', 'tv', 'mweb'])]}},
                 'progress_hooks': [_progress_hook],
                 'postprocessor_hooks': [_postprocessor_hook],
-            }
+            })
             if HAS_FFMPEG:
                 ydl_opts['postprocessors'] = [{
                     'key': 'FFmpegExtractAudio',
@@ -1753,14 +1794,10 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
             
             for query, msg, tol in strategies:
                 task['message'] = msg
-                ydl_opts_search = {
-                    'quiet': True,
-                    'no_warnings': True,
+                _search_client = random.choice(_YT_PLAYER_CLIENTS[:5])
+                ydl_opts_search = _yt_dlp_base_opts(_search_client, extra_opts={
                     'extract_flat': True,
-                    'socket_timeout': 15,
-                    'geo_bypass': True,
-                    'extractor_args': {'youtube': {'player_client': [random.choice(['android', 'ios', 'web', 'tv', 'mweb'])]}},
-                }
+                })
                 try:
                     with yt_dlp.YoutubeDL(ydl_opts_search) as ydl:
                         results = ydl.extract_info(query, download=False)
@@ -1779,14 +1816,10 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
             # Fallback: use Spotify-Scraper's strict duration strategy (±2s)
             if not best_match:
                 task['message'] = 'Matching by duration…'
-                ydl_opts_search = {
-                    'quiet': True,
-                    'no_warnings': True,
+                _search_client = random.choice(_YT_PLAYER_CLIENTS[:5])
+                ydl_opts_search = _yt_dlp_base_opts(_search_client, extra_opts={
                     'extract_flat': True,
-                    'socket_timeout': 15,
-                    'geo_bypass': True,
-                    'extractor_args': {'youtube': {'player_client': [random.choice(['android', 'ios', 'web', 'tv', 'mweb'])]}},
-                }
+                })
                 query = f"ytsearch10:{track_artist} - {track_title}"
                 with yt_dlp.YoutubeDL(ydl_opts_search) as ydl:
                     results = ydl.extract_info(query, download=False)
@@ -1897,18 +1930,14 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
                 elif d.get('status') == 'finished':
                     task['progress'] = 99
 
-            ydl_opts = {
+            _chosen_client = random.choice(_YT_PLAYER_CLIENTS[:5])
+            ydl_opts = _yt_dlp_base_opts(_chosen_client, for_download=True, extra_opts={
                 'format': 'bestaudio/best',
-                'quiet': True,
-                'no_warnings': True,
                 'outtmpl': output_template,
                 'restrictfilenames': True,
-                'socket_timeout': 30,
-                'geo_bypass': True,
-                'extractor_args': {'youtube': {'player_client': [random.choice(['android', 'ios', 'web', 'tv', 'mweb'])]}},
                 'progress_hooks': [_progress_hook],
                 'postprocessor_hooks': [_postprocessor_hook],
-            }
+            })
             if HAS_FFMPEG:
                 ydl_opts['postprocessors'] = [{
                     'key': 'FFmpegExtractAudio',
@@ -2141,12 +2170,8 @@ def get_formats():
     last_error = None
     for attempt in range(3):
         try:
-            ydl_opts = {
-                'quiet': True,
-                'no_warnings': True,
-                'geo_bypass': True,
-                'extractor_args': {'youtube': {'player_client': [random.choice(['android', 'ios', 'web', 'tv', 'mweb'])]}},
-            }
+            _chosen_client = random.choice(_YT_PLAYER_CLIENTS[:5])
+            ydl_opts = _yt_dlp_base_opts(_chosen_client)
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(video_url, download=False)
                 formats = info.get('formats', [])
