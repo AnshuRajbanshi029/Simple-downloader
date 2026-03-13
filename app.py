@@ -859,20 +859,42 @@ def _select_direct_video_format(formats, quality='best'):
     )
 
 
+# Check if aria2c is available for faster multi-connection downloads
+HAS_ARIA2C = shutil.which('aria2c') is not None
+
+
 def _get_quality_labels(formats):
-    """Return best/worst quality labels like 2160p and 144p."""
+    """Return best/worst quality labels + available quality tiers."""
     video_fmts = [
         f for f in formats
         if f.get('vcodec') != 'none' and f.get('height')
     ]
     if not video_fmts:
-        return 'HD', 'SD'
+        return 'HD', 'SD', []
 
     best_height = max(f.get('height', 0) for f in video_fmts)
     worst_height = min(f.get('height', 0) for f in video_fmts)
     best_label = f"{best_height}p" if best_height else 'Best'
     worst_label = f"{worst_height}p" if worst_height else 'Low'
-    return best_label, worst_label
+
+    # Build available quality tiers (unique heights, descending)
+    height_map = {}  # height -> has_audio
+    for f in video_fmts:
+        h = f.get('height', 0)
+        has_a = f.get('acodec') not in (None, 'none')
+        # If ANY format at this height has audio, mark it True
+        if h not in height_map or has_a:
+            height_map[h] = has_a
+
+    available = []
+    for h in sorted(height_map.keys(), reverse=True):
+        available.append({
+            'height': h,
+            'label': f'{h}p',
+            'has_audio': height_map[h],
+        })
+
+    return best_label, worst_label, available
 
 
 def _video_mime_from_ext(ext):
@@ -1435,9 +1457,10 @@ def resolve_video_data(video_url):
             info['duration_display'] = duration_display
 
     if platform_id != 'spotify':
-        best_label, worst_label = _get_quality_labels(info.get('formats', []))
+        best_label, worst_label, available_qualities = _get_quality_labels(info.get('formats', []))
         info['best_quality_label'] = best_label
         info['worst_quality_label'] = worst_label
+        info['available_qualities'] = available_qualities
 
         # Ensure every non-Spotify platform has a formatted duration (mm:ss)
         if not info.get('duration_display'):
@@ -1467,11 +1490,20 @@ def _run_video_download(task, video_url, quality, proxies=None):
     last_error = None
 
     def _pick_video_format(video_url, quality):
-        player_clients = _YT_PLAYER_CLIENTS + [None]
+        """Pick video format. quality: 'best', 'worst', or a specific height like '720'."""
+        # Use only top-5 clients + None, exit on first success (FAST)
+        player_clients = _YT_PLAYER_CLIENTS[:5] + [None]
         chosen_fmt = None
         chosen_client = None
-        chosen_score = None
         probe_error = None
+        target_height = None
+
+        # Parse specific height from quality param (e.g. '720' -> cap at 720p)
+        if quality not in ('best', 'worst'):
+            try:
+                target_height = int(quality)
+            except (ValueError, TypeError):
+                pass  # Fallback to 'best'
 
         def _score(fmt):
             has_audio = 1 if fmt.get('acodec') not in (None, 'none') else 0
@@ -1511,27 +1543,27 @@ def _run_video_download(task, video_url, quality, proxies=None):
                 if not candidates:
                     continue
 
-                candidate = min(candidates, key=_score) if quality == 'worst' else max(candidates, key=_score)
-                candidate_score = _score(candidate)
-
-                if chosen_fmt is None:
-                    chosen_fmt = candidate
-                    chosen_client = player_client
-                    chosen_score = candidate_score
-                    continue
+                # Apply height cap for specific quality requests
+                if target_height:
+                    capped = [f for f in candidates if (f.get('height') or 0) <= target_height]
+                    if capped:
+                        candidates = capped
 
                 if quality == 'worst':
-                    if candidate_score < chosen_score:
-                        chosen_fmt = candidate
-                        chosen_client = player_client
-                        chosen_score = candidate_score
+                    candidate = min(candidates, key=_score)
                 else:
-                    if candidate_score > chosen_score:
-                        chosen_fmt = candidate
-                        chosen_client = player_client
-                        chosen_score = candidate_score
+                    candidate = max(candidates, key=_score)
+
+                chosen_fmt = candidate
+                chosen_client = player_client
+                # ✅ EARLY EXIT: first working client is enough — no need to probe all
+                break
+
             except Exception as e:
                 probe_error = e
+                err_str = str(e).lower()
+                if 'sign in' in err_str or 'bot' in err_str or '403' in err_str:
+                    time.sleep(0.3)
                 continue
 
         if not chosen_fmt:
@@ -1546,6 +1578,7 @@ def _run_video_download(task, video_url, quality, proxies=None):
 
         if HAS_FFMPEG:
             if has_audio:
+                # Video already has audio — no merge needed!
                 format_selector = format_id
             else:
                 audio_selector = (
@@ -1613,28 +1646,29 @@ def _run_video_download(task, video_url, quality, proxies=None):
                     task['progress'] = 99
                     task['message'] = 'Merge complete!'
 
-            ydl_opts = {
+            ydl_opts = _yt_dlp_base_opts(selected_client, for_download=True, extra_opts={
                 'format': fmt,
-                'quiet': True,
-                'no_warnings': True,
                 'outtmpl': output_template,
                 'restrictfilenames': True,
-                'noplaylist': True,
-                'socket_timeout': 30,
-                'geo_bypass': True,
-                'concurrent_fragment_downloads': 8,
+                'concurrent_fragment_downloads': 16,
                 'progress_hooks': [_progress_hook],
                 'postprocessor_hooks': [_postprocessor_hook],
-            }
-            if selected_client:
-                base = _yt_dlp_base_opts(selected_client, for_download=True)
-                ydl_opts['extractor_args'] = base.get('extractor_args', {})
-                ydl_opts['http_headers'] = base.get('http_headers', {})
+                'buffersize': 1024 * 16,  # 16KB buffer for faster IO
+            })
+
+            # Use aria2c for multi-connection downloads if available
+            if HAS_ARIA2C:
+                ydl_opts['external_downloader'] = 'aria2c'
+                ydl_opts['external_downloader_args'] = {
+                    'aria2c': ['-c', '-j', '4', '-x', '16', '-s', '16', '-k', '5M', '--file-allocation=none']
+                }
+
             if HAS_FFMPEG:
                 ydl_opts['merge_output_format'] = 'mp4'
                 if not selected_has_audio:
+                    # Use stream copy for audio when possible (much faster)
                     ydl_opts['postprocessor_args'] = {
-                        'merger+ffmpeg': ['-c:v', 'copy', '-c:a', 'libmp3lame', '-b:a', '192k']
+                        'merger+ffmpeg': ['-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k']
                     }
 
             if selected_height:
@@ -1716,9 +1750,15 @@ def _run_audio_download(task, video_url, audio_format, proxies=None):
                 'format': 'bestaudio/best',
                 'outtmpl': output_template,
                 'restrictfilenames': True,
+                'concurrent_fragment_downloads': 16,
                 'progress_hooks': [_progress_hook],
                 'postprocessor_hooks': [_postprocessor_hook],
             })
+            if HAS_ARIA2C:
+                ydl_opts['external_downloader'] = 'aria2c'
+                ydl_opts['external_downloader_args'] = {
+                    'aria2c': ['-c', '-j', '4', '-x', '16', '-s', '16', '-k', '5M', '--file-allocation=none']
+                }
             if HAS_FFMPEG:
                 ydl_opts['postprocessors'] = [{
                     'key': 'FFmpegExtractAudio',
@@ -1935,9 +1975,15 @@ def _run_spotify_download(task, track_title, track_artist, duration_ms, audio_fo
                 'format': 'bestaudio/best',
                 'outtmpl': output_template,
                 'restrictfilenames': True,
+                'concurrent_fragment_downloads': 16,
                 'progress_hooks': [_progress_hook],
                 'postprocessor_hooks': [_postprocessor_hook],
             })
+            if HAS_ARIA2C:
+                ydl_opts['external_downloader'] = 'aria2c'
+                ydl_opts['external_downloader_args'] = {
+                    'aria2c': ['-c', '-j', '4', '-x', '16', '-s', '16', '-k', '5M', '--file-allocation=none']
+                }
             if HAS_FFMPEG:
                 ydl_opts['postprocessors'] = [{
                     'key': 'FFmpegExtractAudio',

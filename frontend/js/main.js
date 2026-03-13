@@ -1,5 +1,5 @@
 // Backend URL used by the Netlify frontend
-const API_BASE_URL = 'https://simple-downloader-5bscz.sevalla.app';
+const API_BASE_URL = 'http://localhost:5000';
 
 document.addEventListener('DOMContentLoaded', function () {
     const form = document.getElementById('fetchForm');
@@ -197,11 +197,25 @@ function renderVideoCard(info, originalUrl) {
             </div>
         </div>`;
     } else {
-        downloadOptionsHtml = `
-        <div class="download-options">
-            <div class="download-section">
-                <div class="download-section-title">📹 Video Download</div>
-                <div class="download-btn-group">
+        // Build video download buttons dynamically from available qualities
+        const qualities = info.available_qualities || [];
+        let videoButtonsHtml = '';
+
+        if (qualities.length > 0) {
+            // Show distinct quality tiers (max 6 buttons to avoid clutter)
+            const shown = qualities.slice(0, 6);
+            shown.forEach(function(q) {
+                const audioIcon = q.has_audio ? ' 🔊' : '';
+                videoButtonsHtml += `
+                    <a href="#" onclick="startDownload('${originalUrl}', 'video','${q.height}'); return false;"
+                        class="btn-small btn-video">
+                        ${q.label}${audioIcon}
+                        <span class="quality-label">${q.has_audio ? 'with audio' : 'video only'}</span>
+                    </a>`;
+            });
+        } else {
+            // Fallback: classic best/worst buttons
+            videoButtonsHtml = `
                     <a href="#" onclick="startDownload('${originalUrl}', 'video','best'); return false;"
                         class="btn-small btn-video">
                         Highest Quality
@@ -211,7 +225,15 @@ function renderVideoCard(info, originalUrl) {
                         class="btn-small btn-video">
                         Lowest Quality
                         <span class="quality-label">${info.worst_quality_label || 'SD'}</span>
-                    </a>
+                    </a>`;
+        }
+
+        downloadOptionsHtml = `
+        <div class="download-options">
+            <div class="download-section">
+                <div class="download-section-title">📹 Video Download</div>
+                <div class="download-btn-group">
+                    ${videoButtonsHtml}
                 </div>
             </div>
             <div class="download-section">
@@ -404,47 +426,28 @@ function handleDownloadError(message) {
     setTimeout(function () { overlay.classList.remove('active'); }, 3000);
 }
 
-function parseFilenameFromDisposition(disposition) {
-    if (!disposition) return null;
-
-    const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
-    if (utf8Match && utf8Match[1]) {
-        try {
-            return decodeURIComponent(utf8Match[1]);
-        } catch (e) {
-            return utf8Match[1];
-        }
-    }
-
-    const simpleMatch = disposition.match(/filename="?([^";]+)"?/i);
-    return simpleMatch && simpleMatch[1] ? simpleMatch[1] : null;
-}
 
 async function triggerFileDownload(taskId) {
-    const response = await fetch(`${API_BASE_URL}/download_file/${taskId}`);
-    if (!response.ok) {
-        let serverMessage = 'File not available.';
-        try {
-            serverMessage = (await response.text()) || serverMessage;
-        } catch (e) { }
-        throw new Error(serverMessage);
-    }
+    const downloadUrl = `${API_BASE_URL}/download_file/${encodeURIComponent(taskId)}?t=${Date.now()}`;
 
-    const blob = await response.blob();
-    const contentDisposition = response.headers.get('content-disposition') || '';
-    const filename = parseFilenameFromDisposition(contentDisposition) || `download-${taskId}`;
+    // Use a hidden iframe so the browser streams directly to disk.
+    // This avoids loading large files fully into JS memory via fetch+blob.
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.src = downloadUrl;
+    document.body.appendChild(iframe);
 
-    const blobUrl = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = blobUrl;
-    a.download = filename;
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    // Give the request time to start, then resolve.
+    await new Promise(function (resolve) {
+        setTimeout(resolve, 350);
+    });
+
+    // Cleanup iframe later (request will continue in browser).
     setTimeout(function () {
-        URL.revokeObjectURL(blobUrl);
-    }, 2000);
+        if (iframe.parentNode) {
+            iframe.parentNode.removeChild(iframe);
+        }
+    }, 120000);
 }
 
 function pollProgress(taskId) {
@@ -456,7 +459,13 @@ function pollProgress(taskId) {
     const stepMrg = document.getElementById('stepMerge');
     const stepDone = document.getElementById('stepDone');
 
+    let pollInFlight = false;
+    let finalizeStarted = false;
+
     const timer = setInterval(function () {
+        if (pollInFlight || finalizeStarted) return;
+        pollInFlight = true;
+
         fetch(`${API_BASE_URL}/download_progress/${taskId}`)
             .then(r => r.json())
             .then(data => {
@@ -473,7 +482,8 @@ function pollProgress(taskId) {
                     stepDl.className = 'dl-step completed';
                     stepMrg.className = 'dl-step active';
                     stepDone.className = 'dl-step';
-                } else if (data.status === 'done' || data.status === 'served') {
+                } else if ((data.status === 'done' || data.status === 'served') && !finalizeStarted) {
+                    finalizeStarted = true;
                     clearInterval(timer);
                     bar.style.width = '100%';
                     percent.textContent = '100%';
@@ -496,6 +506,7 @@ function pollProgress(taskId) {
                             });
                     }, 500);
                 } else if (data.status === 'error') {
+                    finalizeStarted = true;
                     clearInterval(timer);
                     msg.textContent = data.message || 'Download failed.';
                     msg.classList.add('dl-progress-error');
@@ -504,6 +515,9 @@ function pollProgress(taskId) {
             })
             .catch(function () {
                 // network hiccup, keep polling
+            })
+            .finally(function () {
+                pollInFlight = false;
             });
     }, 600);
 }
