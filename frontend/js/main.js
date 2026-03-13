@@ -1,5 +1,5 @@
 // Backend URL used by the Netlify frontend
-const API_BASE_URL = 'http://localhost:5000';
+const API_BASE_URL = 'https://simple-downloader-5bscz.sevalla.app';
 
 document.addEventListener('DOMContentLoaded', function () {
     const form = document.getElementById('fetchForm');
@@ -197,43 +197,30 @@ function renderVideoCard(info, originalUrl) {
             </div>
         </div>`;
     } else {
-        // Build video download buttons dynamically from available qualities
+        // Check if 720p is available from quality tiers
         const qualities = info.available_qualities || [];
-        let videoButtonsHtml = '';
-
-        if (qualities.length > 0) {
-            // Show distinct quality tiers (max 6 buttons to avoid clutter)
-            const shown = qualities.slice(0, 6);
-            shown.forEach(function(q) {
-                const audioIcon = q.has_audio ? ' 🔊' : '';
-                videoButtonsHtml += `
-                    <a href="#" onclick="startDownload('${originalUrl}', 'video','${q.height}'); return false;"
-                        class="btn-small btn-video">
-                        ${q.label}${audioIcon}
-                        <span class="quality-label">${q.has_audio ? 'with audio' : 'video only'}</span>
-                    </a>`;
-            });
-        } else {
-            // Fallback: classic best/worst buttons
-            videoButtonsHtml = `
-                    <a href="#" onclick="startDownload('${originalUrl}', 'video','best'); return false;"
-                        class="btn-small btn-video">
-                        Highest Quality
-                        <span class="quality-label">${info.best_quality_label || 'HD'}</span>
-                    </a>
-                    <a href="#" onclick="startDownload('${originalUrl}', 'video','worst'); return false;"
-                        class="btn-small btn-video">
-                        Lowest Quality
-                        <span class="quality-label">${info.worst_quality_label || 'SD'}</span>
-                    </a>`;
-        }
+        const has720 = qualities.some(function(q) { return q.height >= 720; });
 
         downloadOptionsHtml = `
         <div class="download-options">
             <div class="download-section">
                 <div class="download-section-title">📹 Video Download</div>
                 <div class="download-btn-group">
-                    ${videoButtonsHtml}
+                    <a href="#" onclick="startDownload('${originalUrl}', 'video','best'); return false;"
+                        class="btn-small btn-video">
+                        Highest Quality
+                        <span class="quality-label">${info.best_quality_label || 'HD'}</span>
+                    </a>
+                    ${has720 ? `<a href="#" onclick="startDownload('${originalUrl}', 'video','720'); return false;"
+                        class="btn-small btn-video">
+                        720p HD
+                        <span class="quality-label">720p</span>
+                    </a>` : ''}
+                    <a href="#" onclick="startDownload('${originalUrl}', 'video','worst'); return false;"
+                        class="btn-small btn-video">
+                        Lowest Quality
+                        <span class="quality-label">${info.worst_quality_label || 'SD'}</span>
+                    </a>
                 </div>
             </div>
             <div class="download-section">
