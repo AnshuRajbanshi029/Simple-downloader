@@ -1554,10 +1554,40 @@ def _run_video_download(task, video_url, quality, proxies=None):
                 else:
                     candidate = max(candidates, key=_score)
 
-                chosen_fmt = candidate
-                chosen_client = player_client
-                # ✅ EARLY EXIT: first working client is enough — no need to probe all
-                break
+                # Determine if we should early exit or keep probing for better quality
+                c_height = candidate.get('height') or 0
+                if target_height:
+                    # If we found at least the target height, we can stop probing
+                    if c_height >= target_height:
+                        chosen_fmt = candidate
+                        chosen_client = player_client
+                        break
+                    else:
+                        # Keep looking, but remember the best we've seen
+                        if not chosen_fmt or c_height > (chosen_fmt.get('height') or 0):
+                            chosen_fmt = candidate
+                            chosen_client = player_client
+                        continue
+                else:
+                    # 'best' or 'worst' requested
+                    if quality == 'worst':
+                        if not chosen_fmt or c_height < (chosen_fmt.get('height') or 9999):
+                            chosen_fmt = candidate
+                            chosen_client = player_client
+                        # For worst, we might just want to check a couple and stop, 
+                        # but web_safari usually gives 144p/360p. Let's just break on the first for 'worst' to save time.
+                        break
+                    else:
+                        # For 'best', we ideally want 1080p or higher.
+                        if c_height >= 1080:
+                            chosen_fmt = candidate
+                            chosen_client = player_client
+                            break
+                        else:
+                            if not chosen_fmt or c_height > (chosen_fmt.get('height') or 0):
+                                chosen_fmt = candidate
+                                chosen_client = player_client
+                            continue
 
             except Exception as e:
                 probe_error = e
@@ -1582,9 +1612,9 @@ def _run_video_download(task, video_url, quality, proxies=None):
                 format_selector = format_id
             else:
                 audio_selector = (
-                    'worstaudio[acodec^=mp4a]/worstaudio[acodec^=aac]/worstaudio[ext=m4a]/worstaudio'
+                    'worstaudio[ext=m4a]/worstaudio'
                     if quality == 'worst'
-                    else 'bestaudio[acodec^=mp4a]/bestaudio[acodec^=aac]/bestaudio[ext=m4a]/bestaudio'
+                    else 'bestaudio[ext=m4a]/bestaudio'
                 )
                 format_selector = f'{format_id}+{audio_selector}/{format_id}'
         else:
@@ -1646,22 +1676,16 @@ def _run_video_download(task, video_url, quality, proxies=None):
                     task['progress'] = 99
                     task['message'] = 'Merge complete!'
 
+            # Removing aria2c and aggressive concurrent_fragment_downloads for video 
+            # to prevent mid-stream 403 bot-blocks from YouTube. 
+            # Standard yt-dlp downloading is much more stable.
             ydl_opts = _yt_dlp_base_opts(selected_client, for_download=True, extra_opts={
                 'format': fmt,
                 'outtmpl': output_template,
                 'restrictfilenames': True,
-                'concurrent_fragment_downloads': 16,
                 'progress_hooks': [_progress_hook],
                 'postprocessor_hooks': [_postprocessor_hook],
-                'buffersize': 1024 * 16,  # 16KB buffer for faster IO
             })
-
-            # Use aria2c for multi-connection downloads if available
-            if HAS_ARIA2C:
-                ydl_opts['external_downloader'] = 'aria2c'
-                ydl_opts['external_downloader_args'] = {
-                    'aria2c': ['-c', '-j', '4', '-x', '16', '-s', '16', '-k', '5M', '--file-allocation=none']
-                }
 
             if HAS_FFMPEG:
                 ydl_opts['merge_output_format'] = 'mp4'
