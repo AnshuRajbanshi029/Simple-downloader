@@ -1623,13 +1623,13 @@ def _run_video_download(task, video_url, quality, proxies=None):
             else:
                 format_selector = 'worst' if quality == 'worst' else 'best'
 
-        return format_selector, chosen_client, chosen_fmt.get('height'), has_audio
+        return format_selector, chosen_client, chosen_fmt.get('height'), has_audio, best_info
     
     for attempt in range(3):
         tmpdir = tempfile.mkdtemp()
         task['tmpdir'] = tmpdir
         try:
-            fmt, selected_client, selected_height, selected_has_audio = _pick_video_format(video_url, quality)
+            fmt, selected_client, selected_height, selected_has_audio, selected_info = _pick_video_format(video_url, quality)
 
             output_template = os.path.join(tmpdir, '%(id)s.%(ext)s')
 
@@ -1700,7 +1700,7 @@ def _run_video_download(task, video_url, quality, proxies=None):
                 task['progress'] = max(task.get('progress', 0), 15)
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(video_url, download=True)
+                info = ydl.process_ie_result(selected_info, download=True)
                 title = info.get('title', 'video')
 
                 downloaded_files = [
@@ -2208,6 +2208,120 @@ def proxy_image():
         pass
 
     return '', 502
+
+
+# ── Public API: YouTube Audio (.mp3) ───────────────────────────────────────
+#
+# Usage:
+#   1. POST /api/youtube/audio   {"url": "https://youtube.com/watch?v=..."}  →  {"task_id": "..."}
+#   2. GET  /api/youtube/audio/status/<task_id>  →  {"status": ..., "progress": ..., "message": ...}
+#   3. GET  /api/youtube/audio/download/<task_id>  →  .mp3 file stream
+#
+
+def _is_youtube_url(url):
+    """Return True only if the URL belongs to YouTube."""
+    return any(d in (url or '').lower() for d in ('youtube.com', 'youtu.be'))
+
+
+@app.route('/api/youtube/audio', methods=['POST'])
+def api_youtube_audio():
+    """Start a YouTube audio-only download (.mp3).
+
+    Request JSON:
+        {"url": "<youtube_url>"}
+
+    Response JSON:
+        {"task_id": "...", "title": "...", "uploader": "...", "duration": "...", "thumbnail": "..."}
+    """
+    data = request.get_json(force=True)
+    video_url = (data.get('url') or '').strip()
+
+    if not video_url:
+        return jsonify({'error': 'Missing required field: url'}), 400
+
+    if not _is_youtube_url(video_url):
+        return jsonify({'error': 'Only YouTube URLs are supported by this endpoint.'}), 400
+
+    if not try_reserve_download():
+        return jsonify({'error': 'Daily download limit reached (100/day). Try again later.'}), 429
+
+    # Quick metadata extraction so the caller gets title/duration right away
+    meta = {}
+    try:
+        info = extract_video_info(video_url)
+        meta['title'] = info.get('title')
+        meta['uploader'] = info.get('uploader') or info.get('channel')
+        meta['duration'] = _format_duration_seconds(info.get('duration'))
+        meta['thumbnail'] = info.get('thumbnail')
+    except Exception:
+        pass  # non-fatal — download can still proceed
+
+    task = _make_task()
+
+    t = threading.Thread(
+        target=_run_audio_download,
+        args=(task, video_url, 'mp3'),
+        daemon=True,
+    )
+    t.start()
+
+    return jsonify({
+        'task_id': task['id'],
+        **meta,
+    })
+
+
+@app.route('/api/youtube/audio/status/<task_id>')
+def api_youtube_audio_status(task_id):
+    """Poll download progress.
+
+    Response JSON:
+        {"status": "downloading|merging|done|error", "progress": 0-100, "message": "..."}
+    """
+    task = download_tasks.get(task_id)
+    if not task:
+        return jsonify({'error': 'Task not found'}), 404
+
+    payload = {
+        'status': task['status'],
+        'progress': task['progress'],
+        'message': task['message'],
+    }
+    if task['status'] == 'done':
+        payload['download_url'] = f'/api/youtube/audio/download/{task_id}'
+        payload['filename'] = task.get('filename')
+        payload['filesize'] = task.get('filesize', 0)
+    elif task['status'] == 'error':
+        payload['error'] = task.get('error')
+
+    return jsonify(payload)
+
+
+@app.route('/api/youtube/audio/download/<task_id>')
+def api_youtube_audio_download(task_id):
+    """Serve the finished .mp3 file."""
+    task = download_tasks.get(task_id)
+    if not task or task['status'] not in ('done', 'served'):
+        return jsonify({'error': 'File not ready or task not found'}), 404
+
+    filepath = task.get('filepath')
+    if not filepath or not os.path.isfile(filepath):
+        return jsonify({'error': 'File no longer available'}), 410
+
+    serve_count = task.get('_serve_count', 0)
+    if serve_count >= 3:
+        return jsonify({'error': 'Download link expired (max 3 downloads per task)'}), 410
+
+    task['status'] = 'served'
+    task['last_activity'] = time.time()
+    task['_serve_count'] = serve_count + 1
+
+    return send_file(
+        filepath,
+        mimetype='audio/mpeg',
+        as_attachment=True,
+        download_name=task.get('filename', 'audio.mp3'),
+    )
 
 
 # Legacy direct-download routes (kept as fallbacks) ────────────────────────
