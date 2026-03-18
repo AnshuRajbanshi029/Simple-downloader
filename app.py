@@ -537,29 +537,32 @@ def _should_proxy_image(url):
 
 
 # ── Centralized YouTube anti-bot evasion config ──────────────────────────────
-# Prioritized player clients: web_safari bypasses most bot detection,
-# mediaconnect and tv_embedded also work well. Classic clients as fallback.
+# Updated for yt-dlp 2026.03.13+:
+#   - android_vr is now yt-dlp's default and works without JS/cookies on most IPs
+#   - tv_embedded and ios/ios_downgraded were REMOVED in yt-dlp 2026.01.31
+#   - web_safari & web_creator now properly request client configs (2026.03.13)
+#   - web_embedded fixed with proper Referer header (2026.03.13)
 _YT_PLAYER_CLIENTS = [
-    'web_safari',      # Safari UA — best bypass for "not a bot" checks
-    'mediaconnect',    # Media device client — low bot detection
-    'tv_embedded',     # Smart TV embedded player — less scrutiny
+    'android_vr',      # yt-dlp default since 2026.02.04 — no JS runtime needed
+    'web_safari',      # Safari UA — good bypass, needs yt-dlp-ejs
+    'web_creator',     # YouTube Studio client — lower scrutiny
+    'web_embedded',    # Embedded player — fixed in 2026.03.13
     'web_music',       # YouTube Music web client
-    'web_creator',     # YouTube Studio client
     'mweb',            # Mobile web
-    'ios',             # iOS app
-    'android',         # Android app
+    'android',         # Android app client
     'web',             # Standard web (most likely to be blocked)
     'tv',              # Smart TV
 ]
 
 # User agents matched to client types for consistency
 _UA_MAP = {
+    'android_vr': 'com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12; eureka-user Build/SQ3A.220605.009.A1) gzip',
     'web_safari': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_4) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15',
-    'ios': 'com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X;)',
+    'web_embedded': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'web_creator': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
     'android': 'com.google.android.youtube/19.44.38 (Linux; U; Android 14) gzip',
     'mweb': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
     'tv': 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version',
-    'tv_embedded': 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version',
     '_default': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
 }
 
@@ -583,6 +586,11 @@ def _yt_dlp_base_opts(player_client=None, for_download=False, extra_opts=None):
         'geo_bypass': True,
         'socket_timeout': 30 if for_download else 20,
         'retries': 5,
+        'extractor_retries': 5,
+        # Randomized sleep between requests — critical for avoiding bot flags
+        'sleep_interval': 1,
+        'max_sleep_interval': 4,
+        'sleep_interval_requests': 1,
         'http_headers': {
             'User-Agent': ua,
             'Accept-Language': 'en-US,en;q=0.9',
@@ -592,11 +600,17 @@ def _yt_dlp_base_opts(player_client=None, for_download=False, extra_opts=None):
     }
 
     if player_client:
+        # For web_embedded, yt-dlp 2026.03.13 needs a non-youtube.com Referer
+        if player_client == 'web_embedded':
+            opts['http_headers']['Referer'] = 'https://www.google.com/'
         opts['extractor_args'] = {
             'youtube': {
                 'player_client': [player_client],
             }
         }
+    else:
+        # Let yt-dlp use its built-in default (android_vr + web_embedded fallback)
+        pass
 
     if for_download:
         opts['concurrent_fragment_downloads'] = 8

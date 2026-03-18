@@ -1,6 +1,7 @@
 flask
 requests
 yt-dlp[default] @ https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.tar.gz
+yt-dlp-ejs>=0.7.0
 gunicorn
 beautifulsoup4
 flask-cors
